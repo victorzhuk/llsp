@@ -46,3 +46,10 @@ SHALL map globs to dialect names; `files.default_dialect` names the fallback.
 #### Scenario: Unknown dialect in association
 - **WHEN** `files.associations` maps `*.x` to `nope`
 - **THEN** validation fails naming `nope`
+
+### Requirement: Workspace symbol limit
+`workspace.max_symbols` (default 256) SHALL cap the number of workspace symbol results.
+
+#### Scenario: Cap
+- **WHEN** `workspace.max_symbols = 2` and the query matches five definitions
+- **THEN** two results are returned

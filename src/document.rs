@@ -128,7 +128,15 @@ pub fn to_position(lines: &LineIndex, text: &str, offset: u32, enc: Encoding) ->
     while !text.is_char_boundary(off) {
         off -= 1;
     }
-    let lc = lines.line_col(TextSize::from(off as u32));
+    lines_position(lines, off as u32, enc)
+}
+
+/// Converts an offset known to be on a char boundary, without the text.
+pub fn lines_position(lines: &LineIndex, offset: u32, enc: Encoding) -> Position {
+    let offset = TextSize::from(offset).min(lines.len());
+    let Some(lc) = lines.try_line_col(offset) else {
+        return Position::new(0, 0);
+    };
     let col = match enc {
         Encoding::Utf8 => lc.col,
         Encoding::Utf16 => lines

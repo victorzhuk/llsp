@@ -39,3 +39,11 @@ The server SHALL use UTF-8 positions when the client lists `utf-8` in
 #### Scenario: UTF-16 client
 - **WHEN** a client without position encodings opens `(ö x)` and asks about `x`
 - **THEN** positions count `ö` as one UTF-16 unit
+
+### Requirement: Invalid parameters
+The server SHALL answer requests whose parameters fail to decode with `InvalidParams`
+(-32602) and keep running.
+
+#### Scenario: Malformed definition params
+- **WHEN** a `textDocument/definition` request has no `position`
+- **THEN** the response carries error code -32602

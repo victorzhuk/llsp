@@ -45,6 +45,7 @@ pub struct Workspace {
     pub index: bool,
     pub exclude: Vec<String>,
     pub max_files: usize,
+    pub max_symbols: usize,
 }
 
 impl Default for Workspace {
@@ -59,6 +60,7 @@ impl Default for Workspace {
                 "**/.clj-kondo/**".into(),
             ],
             max_files: 20_000,
+            max_symbols: 256,
         }
     }
 }

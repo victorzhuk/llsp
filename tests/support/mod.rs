@@ -140,3 +140,75 @@ fn merge(base: &mut Value, over: Value) {
         (b, o) => *b = o,
     }
 }
+
+pub struct Workspace {
+    pub dir: tempfile::TempDir,
+}
+
+impl Workspace {
+    pub fn new(files: &[(&str, &str)]) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        for (path, text) in files {
+            let p = dir.path().join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        Self { dir }
+    }
+
+    pub fn root(&self) -> std::path::PathBuf {
+        self.dir.path().canonicalize().unwrap()
+    }
+
+    pub fn uri(&self, rel: &str) -> String {
+        llsp::document::path_to_uri(&self.root().join(rel))
+            .unwrap()
+            .as_str()
+            .to_owned()
+    }
+
+    pub fn text(&self, rel: &str) -> String {
+        std::fs::read_to_string(self.root().join(rel)).unwrap()
+    }
+
+    /// Starts a client rooted here and waits until `defs` definitions are indexed.
+    pub fn client(&self, defs: usize) -> Client {
+        self.client_with(Layers::default(), defs)
+    }
+
+    pub fn client_with(&self, layers: Layers, defs: usize) -> Client {
+        let root = llsp::document::path_to_uri(&self.root()).unwrap();
+        let mut c = Client::with(layers, json!({"rootUri": root.as_str()}));
+        let deadline = std::time::Instant::now() + TIMEOUT;
+        loop {
+            let v = c
+                .request_raw("workspace/symbol", json!({"query": ""}))
+                .unwrap();
+            if v.as_array().map_or(0, Vec::len) >= defs {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "index timeout: {v}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        c
+    }
+
+    /// Opens a workspace file with its on-disk text.
+    pub fn open(&self, c: &mut Client, rel: &str) {
+        let lang = match rel.rsplit('.').next() {
+            Some("clj") => "clojure",
+            Some("scm") => "scheme",
+            _ => "lisp",
+        };
+        c.open(&self.uri(rel), lang, &self.text(rel));
+    }
+
+    /// Position of the `n`-th occurrence of `needle` in `rel` (UTF-16 == bytes for ASCII).
+    pub fn pos(&self, rel: &str, needle: &str, n: usize) -> Value {
+        let text = self.text(rel);
+        let off = text.match_indices(needle).nth(n).expect(needle).0;
+        let line = text[..off].matches('\n').count();
+        let col = off - text[..off].rfind('\n').map_or(0, |i| i + 1);
+        json!({"textDocument": {"uri": self.uri(rel)}, "position": {"line": line, "character": col}})
+    }
+}
