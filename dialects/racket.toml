@@ -52,7 +52,7 @@ for = "let"
 "for/sum" = "let"
 "for/first" = "let"
 "for*/list" = "let"
-match-lambda = "flet"
+match-lambda = "clauses"
 
 [indent]
 module = 2

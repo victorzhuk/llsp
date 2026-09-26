@@ -5,7 +5,7 @@ case_sensitive = true
 namespace_separators = []
 keyword_prefixes = [":"]
 namespace_forms = []
-def_prefixes = ["def", "cl-def", "define-"]
+def_prefixes = ["def", "cl-def"]
 pattern_ignore = ["&optional", "&rest", "&key", "&body", "&aux", "&allow-other-keys", "."]
 constants = ["nil", "t"]
 special_forms = [
@@ -66,7 +66,7 @@ define-inline = { kind = "function", params = 2 }
 cl-defun = { kind = "function", params = 2 }
 cl-defmacro = { kind = "macro", params = 2 }
 cl-defgeneric = { kind = "interface", params = 2 }
-cl-defmethod = { kind = "method" }
+cl-defmethod = { kind = "method", params = "list" }
 cl-defstruct = { kind = "struct" }
 defvar = { kind = "variable", doc = 3 }
 defvar-local = { kind = "variable", doc = 3 }

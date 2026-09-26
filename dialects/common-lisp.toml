@@ -88,7 +88,7 @@ define-compiler-macro = { kind = "macro", params = 2 }
 define-modify-macro = { kind = "macro", params = 2 }
 define-symbol-macro = { kind = "macro" }
 defgeneric = { kind = "interface", params = 2 }
-defmethod = { kind = "method" }
+defmethod = { kind = "method", params = "list" }
 defvar = { kind = "variable", doc = 3 }
 defparameter = { kind = "variable", doc = 3 }
 defconstant = { kind = "constant", doc = 3 }
@@ -123,7 +123,6 @@ with-input-from-string = "single"
 with-output-to-string = "single"
 with-slots = "bind"
 with-accessors = "bind"
-handler-case = "single"
 flet = "flet"
 labels = "flet"
 macrolet = "flet"
