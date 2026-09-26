@@ -5,10 +5,12 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
+use llsp::analysis::Analysis;
 use llsp::config::{Layers, Settings};
 use llsp::diagnostics::{self, Severity};
-use llsp::document::{Encoding, to_position};
+use llsp::document::{Encoding, path_to_uri, to_position};
 use llsp::syntax::Tree;
+use llsp::workspace::{FileSummary, Index};
 use lsp_server::Connection;
 
 #[derive(Parser)]
@@ -185,21 +187,45 @@ struct Report {
 }
 
 fn check(settings: &Settings, paths: &[PathBuf], json: bool) -> Result<ExitCode> {
-    let mut reports = Vec::new();
     let mut io_error = false;
+    let mut files = Vec::new();
     for path in collect_files(settings, paths) {
-        let text = match read_limited(&path, settings.config.files.max_file_size) {
-            Ok(t) => t,
+        match read_limited(&path, settings.config.files.max_file_size) {
+            Ok(text) => {
+                let dialect = settings.detect(Some(&path), None, &text);
+                let tree = Tree::parse(text, &dialect);
+                let analysis = Analysis::new(&tree, &dialect);
+                files.push((path, dialect, tree, analysis));
+            }
             Err(e) => {
                 eprintln!("llsp: {}: {e:#}", path.display());
                 io_error = true;
-                continue;
             }
+        }
+    }
+    let mut index = Index::default();
+    for (path, dialect, tree, analysis) in &files {
+        if let Some(uri) = path_to_uri(path) {
+            index.insert(FileSummary::new(uri, dialect.clone(), tree, analysis));
+        }
+    }
+
+    let mut reports = Vec::new();
+    for (path, dialect, tree, analysis) in &files {
+        let is_defined = |key: &str| {
+            index
+                .defs_named(key)
+                .any(|(f, _)| f.dialect.name == dialect.name)
         };
-        let dialect = settings.detect(Some(&path), None, &text);
-        let lines = line_index::LineIndex::new(&text);
-        let tree = Tree::parse(text, &dialect);
-        for d in diagnostics::syntax(&tree) {
+        let lines = line_index::LineIndex::new(tree.text());
+        let found = diagnostics::check(
+            tree,
+            analysis,
+            dialect,
+            &settings.config.diagnostics,
+            is_defined,
+        );
+        for d in found {
             let start = to_position(&lines, tree.text(), d.start, Encoding::Utf8);
             let end = to_position(&lines, tree.text(), d.end, Encoding::Utf8);
             reports.push(Report {

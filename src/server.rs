@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, select};
@@ -33,6 +34,7 @@ pub struct Server {
     scan_generation: u64,
     watch_files: bool,
     next_request: i32,
+    pending: FxHashMap<Uri, Instant>,
 }
 
 enum Event {
@@ -116,6 +118,7 @@ pub fn run(conn: Connection, mut layers: Layers) -> Result<bool> {
         scan_generation: 0,
         watch_files,
         next_request: 0,
+        pending: FxHashMap::default(),
     };
     server.register_watchers();
     server.start_scan();
@@ -193,6 +196,10 @@ impl Server {
     fn main_loop(&mut self) -> Result<bool> {
         let events = self.events.1.clone();
         loop {
+            let timer = match self.pending.values().min() {
+                Some(&at) => crossbeam_channel::at(at),
+                None => crossbeam_channel::never(),
+            };
             select! {
                 recv(self.conn.receiver) -> msg => {
                     let Ok(msg) = msg else { return Ok(false) };
@@ -215,6 +222,7 @@ impl Server {
                         self.on_event(ev);
                     }
                 }
+                recv(timer) -> _ => self.flush_diagnostics(),
             }
         }
     }
@@ -232,6 +240,10 @@ impl Server {
                     }
                 }
                 log::info!("indexed {n} files");
+                let open: Vec<Uri> = self.docs.keys().cloned().collect();
+                for uri in open {
+                    self.publish_diagnostics(&uri);
+                }
             }
         }
     }
@@ -414,6 +426,7 @@ impl Server {
     fn did_close(&mut self, p: lsp_types::DidCloseTextDocumentParams) {
         let uri = normalize_uri(&p.text_document.uri);
         self.docs.remove(&uri);
+        self.pending.remove(&uri);
         self.index.remove(&uri);
         if let Some(path) = uri_to_path(&uri)
             && workspace::is_inside(&self.roots, &path)
@@ -511,14 +524,43 @@ impl Server {
             doc.tree(),
             doc.analysis(),
         ));
-        self.publish_diagnostics(uri);
+        match self.settings.config.diagnostics.debounce_ms {
+            0 => self.publish_diagnostics(uri),
+            ms => {
+                self.pending
+                    .insert(uri.clone(), Instant::now() + Duration::from_millis(ms));
+            }
+        }
+    }
+
+    fn flush_diagnostics(&mut self) {
+        let now = Instant::now();
+        let due: Vec<Uri> = self
+            .pending
+            .iter()
+            .filter(|&(_, &at)| at <= now)
+            .map(|(u, _)| u.clone())
+            .collect();
+        for uri in due {
+            self.pending.remove(&uri);
+            self.publish_diagnostics(&uri);
+        }
     }
 
     fn publish_diagnostics(&self, uri: &Uri) {
         let Some(doc) = self.docs.get(uri) else {
             return;
         };
-        let diagnostics = diagnostics::syntax(doc.tree())
+        let same = |f: &FileSummary| f.dialect.name == doc.dialect.name;
+        let is_defined = |key: &str| self.index.defs_named(key).any(|(f, _)| same(f));
+        let found = diagnostics::check(
+            doc.tree(),
+            doc.analysis(),
+            &doc.dialect,
+            &self.settings.config.diagnostics,
+            is_defined,
+        );
+        let diagnostics = found
             .into_iter()
             .map(|d| lsp_types::Diagnostic {
                 range: doc.range(d.start, d.end, self.enc),
@@ -531,6 +573,9 @@ impl Server {
                 code: Some(lsp_types::NumberOrString::String(d.code.into())),
                 source: Some("llsp".into()),
                 message: d.message,
+                tags: d
+                    .unnecessary
+                    .then(|| vec![lsp_types::DiagnosticTag::UNNECESSARY]),
                 ..Default::default()
             })
             .collect();
@@ -562,6 +607,7 @@ mod tests {
             scan_generation: 0,
             watch_files: false,
             next_request: 0,
+            pending: FxHashMap::default(),
         };
         (s, client)
     }

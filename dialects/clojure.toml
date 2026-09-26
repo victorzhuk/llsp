@@ -7,6 +7,7 @@ keyword_prefixes = ["::", ":"]
 namespace_forms = ["ns", "in-ns"]
 def_prefixes = ["def"]
 pattern_ignore = ["&", "_"]
+data_forms = ["quote", "ns", "case", "cond", "condp", "defprotocol", "defrecord", "deftype", "definterface", "reify", "extend-type", "extend-protocol", "extend", "proxy", "comment", "import", "require"]
 constants = ["nil", "true", "false"]
 special_forms = [
   "def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "catch",

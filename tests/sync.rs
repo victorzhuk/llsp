@@ -9,9 +9,9 @@ const URI: &str = "file:///w/a.lisp";
 #[test]
 fn open_publishes_syntax_diagnostics() {
     let mut c = Client::start();
-    c.open(URI, "lisp", "(defun f (x)");
+    c.open(URI, "lisp", "(defun f (x) x");
     let d = c.diagnostics(URI);
-    assert_eq!(d.len(), 1);
+    assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(d[0]["code"], "unclosed-delimiter");
     assert_eq!(d[0]["range"]["start"], json!({"line": 0, "character": 0}));
     c.shutdown();

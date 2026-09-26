@@ -7,6 +7,7 @@ keyword_prefixes = [":"]
 namespace_forms = []
 def_prefixes = ["def", "cl-def"]
 pattern_ignore = ["&optional", "&rest", "&key", "&body", "&aux", "&allow-other-keys", "."]
+data_forms = ["quote", "declare", "interactive", "cond", "pcase", "pcase-let", "pcase-dolist", "cl-case", "cl-typecase", "condition-case", "cl-defstruct", "defcustom", "defgroup", "defface", "use-package"]
 constants = ["nil", "t"]
 special_forms = [
   "and", "catch", "cond", "condition-case", "defconst", "defvar", "function", "if",
