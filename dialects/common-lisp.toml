@@ -1,0 +1,179 @@
+special_forms = [
+  "block", "catch", "eval-when", "flet", "function", "go", "if", "labels", "let", "let*",
+  "load-time-value", "locally", "macrolet", "multiple-value-call", "multiple-value-prog1",
+  "progn", "progv", "quote", "return-from", "setq", "symbol-macrolet", "tagbody", "the",
+  "throw", "unwind-protect",
+  "defun", "defmacro", "defvar", "defparameter", "defconstant", "defclass", "defgeneric",
+  "defmethod", "defstruct", "deftype", "defpackage", "define-condition", "in-package",
+  "lambda", "when", "unless", "cond", "case", "ecase", "ccase", "typecase", "etypecase",
+  "ctypecase", "and", "or", "loop", "do", "do*", "dolist", "dotimes", "prog1", "prog2",
+  "prog", "prog*", "return", "setf", "psetf", "psetq", "incf", "decf", "push", "pop", "pushnew",
+  "handler-case", "handler-bind", "restart-case", "restart-bind", "ignore-errors",
+  "destructuring-bind", "multiple-value-bind", "multiple-value-setq", "declare", "declaim",
+  "proclaim", "assert", "check-type", "with-open-file", "with-open-stream",
+  "with-output-to-string", "with-input-from-string", "with-slots", "with-accessors",
+  "with-simple-restart", "with-standard-io-syntax", "with-hash-table-iterator",
+  "with-package-iterator", "with-compilation-unit", "print-unreadable-object",
+]
+builtins = [
+  "car", "cdr", "cons", "list", "list*", "append", "reverse", "nreverse", "length", "nth",
+  "nthcdr", "first", "second", "third", "fourth", "fifth", "rest", "last", "butlast", "member",
+  "assoc", "rassoc", "getf", "remf", "mapcar", "mapc", "mapcan", "maplist", "mapl", "mapcon",
+  "reduce", "remove", "remove-if", "remove-if-not", "delete", "delete-if", "find", "find-if",
+  "position", "position-if", "count", "count-if", "some", "every", "notany", "notevery",
+  "sort", "stable-sort", "subseq", "concatenate", "copy-seq", "copy-list", "copy-tree",
+  "elt", "aref", "svref", "vector", "make-array", "array-dimension", "fill", "replace",
+  "search", "mismatch", "substitute", "gethash", "remhash", "clrhash", "maphash",
+  "make-hash-table", "hash-table-count", "funcall", "apply", "values", "values-list",
+  "identity", "complement", "constantly", "format", "print", "prin1", "princ", "pprint",
+  "write", "write-string", "write-line", "write-char", "terpri", "fresh-line", "read",
+  "read-line", "read-char", "peek-char", "read-from-string", "parse-integer", "open",
+  "close", "error", "warn", "signal", "cerror", "make-condition", "invoke-restart",
+  "find-restart", "compute-restarts", "eq", "eql", "equal", "equalp", "not", "null",
+  "atom", "consp", "listp", "symbolp", "stringp", "numberp", "integerp", "floatp",
+  "characterp", "functionp", "vectorp", "arrayp", "hash-table-p", "keywordp", "zerop",
+  "plusp", "minusp", "evenp", "oddp", "+", "-", "*", "/", "=", "/=", "<", ">", "<=", ">=",
+  "1+", "1-", "min", "max", "abs", "mod", "rem", "floor", "ceiling", "truncate", "round",
+  "sqrt", "expt", "exp", "log", "random", "gcd", "lcm", "string", "string=", "string-equal",
+  "string<", "string>", "string-upcase", "string-downcase", "string-capitalize",
+  "string-trim", "string-left-trim", "string-right-trim", "char", "schar", "char=",
+  "char-equal", "char-code", "code-char", "char-upcase", "char-downcase", "symbol-name",
+  "symbol-value", "symbol-function", "symbol-package", "intern", "find-symbol",
+  "make-symbol", "gensym", "gentemp", "find-package", "make-package", "use-package",
+  "export", "import", "shadow", "fboundp", "boundp", "fdefinition", "macro-function",
+  "macroexpand", "macroexpand-1", "eval", "compile", "load", "coerce", "type-of", "typep",
+  "subtypep", "make-instance", "slot-value", "slot-boundp", "initialize-instance",
+  "call-next-method", "next-method-p", "class-of", "find-class", "describe", "documentation",
+  "get-universal-time", "get-internal-real-time", "sleep", "time", "trace", "untrace",
+  "prog1", "nconc", "rplaca", "rplacd", "acons", "pairlis", "union", "intersection",
+  "set-difference", "subsetp", "adjoin", "remove-duplicates",
+]
+extensions = ["lisp", "lsp", "cl", "l", "asd", "ros"]
+language_ids = ["lisp", "commonlisp", "common-lisp"]
+modeline_names = ["lisp", "common-lisp", "common lisp"]
+case_sensitive = false
+namespace_separators = ["::", ":"]
+keyword_prefixes = [":"]
+namespace_forms = ["in-package"]
+def_prefixes = ["def", "define-"]
+pattern_ignore = ["&optional", "&rest", "&key", "&aux", "&body", "&whole", "&environment", "&allow-other-keys", "."]
+constants = ["nil", "t"]
+
+[reader]
+brackets = ["()"]
+line_comment = ";"
+block_comment = ["#|", "|#"]
+nested_block_comments = true
+char_prefix = "#\\"
+symbol_bars = true
+symbol_escape = true
+terminators = "'`,"
+sharp_dispatch = true
+
+[reader.prefixes]
+"'" = 1
+"`" = 1
+"," = 1
+",@" = 1
+",." = 1
+"#'" = 1
+"#." = 1
+"#+" = 2
+"#-" = 2
+
+[defs]
+defun = { kind = "function", params = 2 }
+defmacro = { kind = "macro", params = 2 }
+define-compiler-macro = { kind = "macro", params = 2 }
+define-modify-macro = { kind = "macro", params = 2 }
+define-symbol-macro = { kind = "macro" }
+defgeneric = { kind = "interface", params = 2 }
+defmethod = { kind = "method" }
+defvar = { kind = "variable", doc = 3 }
+defparameter = { kind = "variable", doc = 3 }
+defconstant = { kind = "constant", doc = 3 }
+defclass = { kind = "class" }
+define-condition = { kind = "class" }
+defstruct = { kind = "struct" }
+deftype = { kind = "type", params = 2 }
+defpackage = { kind = "module" }
+define-method-combination = { kind = "function" }
+defsetf = { kind = "function" }
+define-setf-expander = { kind = "function", params = 2 }
+
+[bindings]
+let = "let"
+"let*" = "let"
+do = "let"
+"do*" = "let"
+prog = "let"
+"prog*" = "let"
+symbol-macrolet = "let"
+lambda = "lambda"
+destructuring-bind = "bind"
+multiple-value-bind = "bind"
+dolist = "single"
+dotimes = "single"
+do-symbols = "single"
+do-external-symbols = "single"
+do-all-symbols = "single"
+with-open-file = "single"
+with-open-stream = "single"
+with-input-from-string = "single"
+with-output-to-string = "single"
+with-slots = "bind"
+with-accessors = "bind"
+handler-case = "single"
+flet = "flet"
+labels = "flet"
+macrolet = "flet"
+
+[indent]
+defun = 2
+defmacro = 2
+defgeneric = 2
+defmethod = 2
+defclass = 2
+defstruct = 1
+defpackage = 1
+lambda = 1
+let = 1
+"let*" = 1
+flet = 1
+labels = 1
+macrolet = 1
+symbol-macrolet = 1
+destructuring-bind = 2
+multiple-value-bind = 2
+when = 1
+unless = 1
+if = 2
+block = 1
+catch = 1
+case = 1
+ecase = 1
+ccase = 1
+typecase = 1
+etypecase = 1
+ctypecase = 1
+handler-case = 1
+handler-bind = 1
+restart-case = 1
+unwind-protect = 1
+dolist = 1
+dotimes = 1
+do = 2
+"do*" = 2
+progn = 0
+prog1 = 1
+prog2 = 2
+tagbody = 0
+eval-when = 1
+return-from = 1
+print-unreadable-object = 1
+
+[indent_prefixes]
+"def" = 2
+"with-" = 1
+"do-" = 1
+

@@ -1,0 +1,7 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"clojure\", \"(foo]\"))"
+---
+Root[List(Paren)![Atom"foo"]]
+unclosed-delimiter@0..1
+mismatched-delimiter@4..5

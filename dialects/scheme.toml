@@ -1,0 +1,123 @@
+extensions = ["scm", "ss", "sld", "sls", "sps", "sch", "guile", "chicken"]
+language_ids = ["scheme", "guile", "chicken"]
+modeline_names = ["scheme", "guile", "chicken"]
+case_sensitive = true
+namespace_separators = []
+keyword_prefixes = ["#:"]
+namespace_forms = []
+def_prefixes = ["define-"]
+pattern_ignore = [".", "..."]
+constants = ["#t", "#f", "#true", "#false"]
+special_forms = [
+  "define", "define-syntax", "define-record-type", "define-values", "define-library",
+  "define-module", "define-public", "lambda", "case-lambda", "let", "let*", "letrec",
+  "letrec*", "let-values", "let*-values", "let-syntax", "letrec-syntax", "syntax-rules",
+  "syntax-case", "if", "cond", "case", "when", "unless", "and", "or", "begin", "do", "delay",
+  "delay-force", "make-promise", "quote", "quasiquote", "unquote", "unquote-splicing",
+  "set!", "guard", "parameterize", "import", "export", "include", "else", "=>",
+  "use-modules", "module", "receive",
+]
+builtins = [
+  "car", "cdr", "cons", "list", "append", "reverse", "length", "list-ref", "list-tail",
+  "memq", "memv", "member", "assq", "assv", "assoc", "map", "for-each", "apply", "vector",
+  "make-vector", "vector-ref", "vector-set!", "vector-length", "vector->list",
+  "list->vector", "string", "make-string", "string-ref", "string-length", "string-append",
+  "substring", "string->list", "list->string", "string->symbol", "symbol->string",
+  "string->number", "number->string", "string=?", "string<?", "char=?", "char<?",
+  "eq?", "eqv?", "equal?", "not", "null?", "pair?", "list?", "symbol?", "string?",
+  "number?", "integer?", "procedure?", "boolean?", "vector?", "char?", "zero?", "positive?",
+  "negative?", "odd?", "even?", "+", "-", "*", "/", "=", "<", ">", "<=", ">=", "max", "min",
+  "abs", "quotient", "remainder", "modulo", "floor", "ceiling", "round", "truncate",
+  "sqrt", "expt", "exp", "log", "display", "write", "newline", "read", "read-line",
+  "read-char", "write-char", "write-string", "open-input-file", "open-output-file",
+  "close-port", "call-with-current-continuation", "call/cc", "dynamic-wind", "values",
+  "call-with-values", "error", "raise", "raise-continuable", "with-exception-handler",
+  "error-object-message", "error-object-irritants", "force", "eval", "exit",
+  "string-copy", "string-fill!", "vector-fill!", "vector-map", "vector-for-each",
+  "string-map", "string-for-each", "char->integer", "integer->char", "exact", "inexact",
+  "exact->inexact", "inexact->exact", "number->string", "boolean=?", "assertion-violation",
+  "list-copy", "last-pair", "iota", "fold", "fold-left", "fold-right", "reduce", "filter",
+  "delete", "remove", "any", "every",
+]
+
+[reader]
+brackets = ["()", "[]"]
+line_comment = ";"
+block_comment = ["#|", "|#"]
+nested_block_comments = true
+datum_comments = ["#;"]
+char_prefix = "#\\"
+symbol_bars = true
+terminators = "'`,"
+sharp_dispatch = true
+
+[reader.prefixes]
+"'" = 1
+"`" = 1
+"," = 1
+",@" = 1
+"#'" = 1
+"#`" = 1
+"#," = 1
+"#,@" = 1
+
+[defs]
+define = { kind = "function" }
+define-public = { kind = "function" }
+define-syntax = { kind = "macro" }
+define-record-type = { kind = "struct" }
+define-library = { kind = "module" }
+define-module = { kind = "module" }
+define-values = { kind = "variable" }
+define-macro = { kind = "macro" }
+
+[bindings]
+let = "let"
+"let*" = "let"
+letrec = "let"
+"letrec*" = "let"
+let-values = "let"
+"let*-values" = "let"
+let-syntax = "let"
+letrec-syntax = "let"
+fluid-let = "let"
+parameterize = "let"
+do = "let"
+lambda = "lambda"
+"λ" = "lambda"
+case-lambda = "flet"
+receive = "bind"
+
+[indent]
+define = 1
+define-syntax = 1
+define-record-type = 2
+define-library = 1
+define-module = 1
+lambda = 1
+"λ" = 1
+let = 1
+"let*" = 1
+letrec = 1
+"letrec*" = 1
+let-values = 1
+"let*-values" = 1
+let-syntax = 1
+letrec-syntax = 1
+syntax-rules = 1
+syntax-case = 2
+when = 1
+unless = 1
+case = 1
+do = 2
+guard = 1
+parameterize = 1
+receive = 2
+with-exception-handler = 1
+call-with-values = 1
+dynamic-wind = 0
+
+[indent_prefixes]
+"define" = 1
+"with-" = 1
+"call-with-" = 1

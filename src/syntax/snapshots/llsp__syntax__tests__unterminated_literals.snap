@@ -1,0 +1,7 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\", \"(a \\\"b\"))"
+---
+Root[List(Paren)![Atom"a" Str"\"b"]]
+unclosed-delimiter@0..1
+unterminated-string@3..4

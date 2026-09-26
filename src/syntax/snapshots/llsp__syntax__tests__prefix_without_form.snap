@@ -1,0 +1,6 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\", \"(a ')\"))"
+---
+Root[List(Paren)[Atom"a" Prefix"'"![]]]
+missing-form@3..4

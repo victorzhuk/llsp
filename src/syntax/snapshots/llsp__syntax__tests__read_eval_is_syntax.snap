@@ -1,0 +1,5 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\", \"#.(delete-file \\\"x\\\")\"))"
+---
+Root[Prefix"#."[List(Paren)[Atom"delete-file" Str"\"x\""]]]

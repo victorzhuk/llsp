@@ -1,0 +1,150 @@
+extensions = ["clj", "cljs", "cljc", "cljd", "edn", "bb"]
+language_ids = ["clojure", "clojurescript", "edn"]
+modeline_names = ["clojure", "clojurescript", "clojurec"]
+case_sensitive = true
+namespace_separators = ["/"]
+keyword_prefixes = ["::", ":"]
+namespace_forms = ["ns", "in-ns"]
+def_prefixes = ["def"]
+pattern_ignore = ["&", "_"]
+constants = ["nil", "true", "false"]
+special_forms = [
+  "def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "catch",
+  "finally", "monitor-enter", "monitor-exit", "new", "set!", ".", "letfn",
+  "defn", "defn-", "defmacro", "defmulti", "defmethod", "defprotocol", "defrecord",
+  "deftype", "defonce", "definterface", "defstruct", "ns", "in-ns", "when", "when-not",
+  "when-let", "when-some", "when-first", "if-let", "if-some", "if-not", "cond", "condp",
+  "case", "cond->", "cond->>", "and", "or", "->", "->>", "as->", "some->", "some->>", "doto",
+  "for", "doseq", "dotimes", "while", "binding", "with-open", "with-redefs", "with-meta",
+  "delay", "future", "lazy-seq", "comment", "declare", "extend-type", "extend-protocol",
+  "reify", "proxy", "assert", "time",
+]
+builtins = [
+  "map", "filter", "remove", "reduce", "reduce-kv", "into", "conj", "cons", "assoc",
+  "assoc-in", "dissoc", "update", "update-in", "get", "get-in", "contains?", "keys", "vals",
+  "first", "second", "rest", "next", "last", "butlast", "nth", "count", "empty?", "seq",
+  "vec", "vector", "list", "hash-map", "hash-set", "set", "sorted-map", "sorted-set",
+  "range", "repeat", "repeatedly", "iterate", "take", "drop", "take-while", "drop-while",
+  "partition", "partition-by", "partition-all", "group-by", "frequencies", "sort", "sort-by",
+  "reverse", "concat", "mapcat", "interleave", "interpose", "distinct", "flatten", "zipmap",
+  "merge", "merge-with", "select-keys", "some", "every?", "not-any?", "not-every?",
+  "apply", "partial", "comp", "juxt", "identity", "constantly", "complement", "memoize",
+  "fnil", "str", "subs", "format", "println", "print", "prn", "pr", "pr-str", "prn-str",
+  "print-str", "slurp", "spit", "read-string", "keyword", "symbol", "name", "namespace",
+  "atom", "swap!", "reset!", "deref", "ref", "dosync", "alter", "commute", "agent", "send",
+  "inc", "dec", "+", "-", "*", "/", "=", "==", "not=", "<", ">", "<=", ">=", "max", "min",
+  "mod", "rem", "quot", "abs", "zero?", "pos?", "neg?", "even?", "odd?", "nil?", "some?",
+  "true?", "false?", "not", "number?", "string?", "keyword?", "symbol?", "map?", "vector?",
+  "set?", "seq?", "coll?", "fn?", "ifn?", "boolean", "int", "long", "double", "char",
+  "throw", "ex-info", "ex-data", "ex-message", "type", "class", "instance?", "meta",
+  "vary-meta", "require", "use", "import", "refer", "resolve", "the-ns", "find-ns",
+  "doall", "dorun", "run!", "keep", "keep-indexed", "map-indexed", "mapv", "filterv",
+  "last", "peek", "pop", "subvec", "split-at", "split-with", "rand", "rand-int", "rand-nth",
+  "shuffle", "gensym", "macroexpand", "macroexpand-1", "eval", "identical?", "compare",
+  "hash", "nthnext", "nthrest", "tree-seq", "trampoline", "volatile!", "vswap!", "vreset!",
+  "transduce", "sequence", "eduction", "completing", "cat", "dedupe", "random-sample",
+  "update-vals", "update-keys", "parse-long", "parse-double", "parse-boolean", "parse-uuid",
+  "random-uuid", "abs", "add-watch", "remove-watch", "future-call", "promise", "deliver",
+  "realized?", "force",
+]
+
+[reader]
+brackets = ["()", "[]", "{}"]
+line_comment = ";"
+datum_comments = ["#_"]
+char_prefix = "\\"
+comma_whitespace = true
+terminators = "@^`~"
+sharp_dispatch = true
+
+[reader.prefixes]
+"'" = 1
+"`" = 1
+"~" = 1
+"~@" = 1
+"@" = 1
+"^" = 2
+"#^" = 2
+"#'" = 1
+"#=" = 1
+"#?" = 1
+"#?@" = 1
+
+[defs]
+def = { kind = "variable" }
+defonce = { kind = "variable" }
+defn = { kind = "function", params = "vector" }
+"defn-" = { kind = "function", params = "vector" }
+defmacro = { kind = "macro", params = "vector" }
+defmulti = { kind = "interface" }
+defmethod = { kind = "method" }
+defprotocol = { kind = "interface" }
+definterface = { kind = "interface" }
+defrecord = { kind = "struct", params = 2 }
+deftype = { kind = "class", params = 2 }
+defstruct = { kind = "struct" }
+deftest = { kind = "test" }
+ns = { kind = "module" }
+
+[bindings]
+let = "let-vector"
+"let*" = "let-vector"
+loop = "let-vector"
+for = "let-vector"
+doseq = "let-vector"
+dotimes = "let-vector"
+binding = "let-vector"
+with-open = "let-vector"
+with-redefs = "let-vector"
+if-let = "let-vector"
+when-let = "let-vector"
+if-some = "let-vector"
+when-some = "let-vector"
+when-first = "let-vector"
+fn = "fn"
+"fn*" = "fn"
+letfn = "flet"
+
+[indent]
+ns = 1
+fn = 1
+let = 1
+"let*" = 1
+letfn = 1
+loop = 1
+for = 1
+doseq = 1
+dotimes = 1
+binding = 1
+with-open = 1
+with-redefs = 1
+if-let = 1
+when-let = 1
+if-some = 1
+when-some = 1
+when-first = 1
+when = 1
+when-not = 1
+while = 1
+case = 1
+condp = 2
+try = 0
+catch = 2
+finally = 0
+do = 0
+doto = 1
+comment = 0
+reify = 1
+proxy = 2
+extend-type = 1
+extend-protocol = 1
+future = 0
+delay = 0
+locking = 1
+testing = 1
+deftest = 1
+are = 2
+
+[indent_prefixes]
+"def" = 1
+"with-" = 1

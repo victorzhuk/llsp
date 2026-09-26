@@ -1,0 +1,110 @@
+extensions = ["janet", "jdn"]
+language_ids = ["janet"]
+modeline_names = ["janet"]
+case_sensitive = true
+namespace_separators = ["/"]
+keyword_prefixes = [":"]
+namespace_forms = []
+def_prefixes = ["def"]
+pattern_ignore = ["&", "&opt", "&keys", "&named", "_"]
+constants = ["nil", "true", "false"]
+special_forms = [
+  "def", "var", "fn", "do", "quote", "if", "splice", "while", "break", "set", "quasiquote",
+  "unquote", "upscope", "defn", "defn-", "defmacro", "defmacro-", "def-", "var-", "let",
+  "when", "unless", "cond", "case", "match", "loop", "seq", "generate", "for", "each",
+  "eachk", "eachp", "eachy", "repeat", "forever", "try", "protect", "defer", "edefer",
+  "with", "with-dyns", "with-syms", "and", "or", "->", "->>", "-?>", "-?>>", "as->", "if-let",
+  "when-let", "import", "use", "comment", "label", "prompt", "ev/spawn", "ev/go",
+]
+builtins = [
+  "print", "printf", "prin", "pp", "eprint", "eprintf", "string", "string/format",
+  "string/join", "string/split", "string/find", "string/replace", "string/slice",
+  "string/trim", "string/has-prefix?", "string/has-suffix?", "buffer", "buffer/push",
+  "array", "array/push", "array/pop", "array/concat", "tuple", "table", "struct",
+  "keys", "values", "pairs", "length", "get", "get-in", "put", "put-in", "update",
+  "update-in", "in", "map", "filter", "reduce", "mapcat", "keep", "find", "sort", "sort-by",
+  "reverse", "first", "last", "take", "drop", "range", "frequencies", "group-by",
+  "distinct", "flatten", "interleave", "partition", "merge", "zipcoll", "apply", "partial",
+  "comp", "identity", "error", "errorf", "assert", "type", "describe", "nil?", "empty?",
+  "number?", "string?", "keyword?", "symbol?", "function?", "array?", "tuple?", "table?",
+  "struct?", "indexed?", "dictionary?", "+", "-", "*", "/", "%", "=", "not=", "<", ">",
+  "<=", ">=", "inc", "dec", "max", "min", "not", "slurp", "spit", "file/open", "file/read",
+  "file/write", "file/close", "os/time", "os/clock", "os/getenv", "os/exit", "math/floor",
+  "math/ceil", "math/abs", "math/random", "require", "dofile", "eval", "parse", "compile",
+  "fiber/new", "resume", "yield", "ev/sleep", "ev/chan", "ev/give", "ev/take",
+]
+
+[reader]
+brackets = ["()", "[]", "{}"]
+line_comment = "#"
+long_string = "`"
+
+[reader.prefixes]
+"'" = 1
+"~" = 1
+"," = 1
+";" = 1
+"|" = 1
+"@" = 1
+
+[defs]
+def = { kind = "variable" }
+"def-" = { kind = "variable" }
+var = { kind = "variable" }
+"var-" = { kind = "variable" }
+defn = { kind = "function", params = "vector" }
+"defn-" = { kind = "function", params = "vector" }
+defmacro = { kind = "macro", params = "vector" }
+"defmacro-" = { kind = "macro", params = "vector" }
+defglobal = { kind = "variable" }
+varglobal = { kind = "variable" }
+deftest = { kind = "test" }
+
+[bindings]
+let = "let-vector"
+loop = "let-vector"
+seq = "let-vector"
+generate = "let-vector"
+if-let = "let-vector"
+when-let = "let-vector"
+with = "let-vector"
+with-syms = "single"
+each = "single"
+eachk = "single"
+eachp = "single"
+eachy = "single"
+for = "single"
+repeat = "single"
+fn = "fn"
+
+[indent]
+fn = 1
+let = 1
+loop = 1
+seq = 1
+generate = 1
+for = 1
+each = 1
+eachk = 1
+eachp = 1
+eachy = 1
+repeat = 1
+while = 1
+when = 1
+unless = 1
+if-let = 1
+when-let = 1
+with = 1
+with-dyns = 1
+with-syms = 1
+case = 1
+match = 1
+try = 0
+protect = 0
+defer = 1
+forever = 0
+do = 0
+comment = 0
+
+[indent_prefixes]
+"def" = 1

@@ -1,0 +1,5 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\",\n\"(defun f (x) \\\"doc\\\" #'car #\\\\( #+sbcl (a) |a b| #|x #|y|# z|# #p\\\"/tmp\\\" #1=(a . #1#))\"))"
+---
+Root[List(Paren)[Atom"defun" Atom"f" List(Paren)[Atom"x"] Str"\"doc\"" Prefix"#'"[Atom"car"] Char"#\\(" Prefix"#+"[Atom"sbcl" List(Paren)[Atom"a"]] Atom"|a b|" Prefix"#p"[Str"\"/tmp\""] Prefix"#1="[List(Paren)[Atom"a" Atom"." Atom"#1#"]]]]

@@ -1,0 +1,76 @@
+extends = "scheme"
+extensions = ["rkt", "rktl", "rktd", "scrbl"]
+language_ids = ["racket"]
+modeline_names = ["racket"]
+keyword_prefixes = ["#:"]
+def_prefixes = ["define-"]
+special_forms = [
+  "define", "define-values", "define-syntax", "define-syntax-rule", "define-struct",
+  "struct", "lambda", "λ", "case-lambda", "let", "let*", "letrec", "let-values",
+  "let*-values", "if", "cond", "case", "when", "unless", "and", "or", "begin", "begin0",
+  "do", "quote", "quasiquote", "set!", "require", "provide", "module", "module+",
+  "module*", "for", "for/list", "for/vector", "for/hash", "for/fold", "for/and", "for/or",
+  "for/sum", "for/first", "for*", "for*/list", "match", "match-define", "match-let",
+  "match-lambda", "with-handlers", "parameterize", "syntax-parse", "syntax-rules",
+  "syntax-case", "define-values", "else", "=>", "#%app", "#%datum",
+]
+builtins = [
+  "car", "cdr", "cons", "list", "list*", "append", "reverse", "length", "list-ref",
+  "first", "second", "third", "rest", "last", "empty?", "empty", "map", "for-each",
+  "andmap", "ormap", "foldl", "foldr", "filter", "remove", "sort", "member", "assoc",
+  "apply", "vector", "vector-ref", "vector-set!", "vector-length", "make-vector",
+  "hash", "make-hash", "hash-ref", "hash-set", "hash-set!", "hash-update", "hash-update!",
+  "hash-remove", "hash-keys", "hash-values", "hash->list", "hash-has-key?", "string",
+  "string-append", "string-length", "substring", "string-split", "string-join",
+  "string-trim", "string-replace", "string->symbol", "symbol->string", "string->number",
+  "number->string", "format", "printf", "displayln", "display", "write", "newline",
+  "println", "error", "raise", "eq?", "eqv?", "equal?", "not", "null?", "pair?", "list?",
+  "number?", "string?", "symbol?", "procedure?", "void", "values", "add1", "sub1", "+", "-",
+  "*", "/", "=", "<", ">", "<=", ">=", "max", "min", "abs", "quotient", "remainder",
+  "modulo", "exact->inexact", "build-list", "range", "in-range", "in-list", "in-vector",
+  "in-hash", "in-naturals", "current-output-port", "with-output-to-string",
+]
+
+[defs]
+define = { kind = "function" }
+define-values = { kind = "variable" }
+define-syntax = { kind = "macro" }
+define-syntax-rule = { kind = "macro" }
+define-struct = { kind = "struct" }
+struct = { kind = "struct" }
+module = { kind = "module" }
+"module+" = { kind = "module" }
+
+[bindings]
+for = "let"
+"for*" = "let"
+"for/list" = "let"
+"for/vector" = "let"
+"for/hash" = "let"
+"for/and" = "let"
+"for/or" = "let"
+"for/sum" = "let"
+"for/first" = "let"
+"for*/list" = "let"
+match-lambda = "flet"
+
+[indent]
+module = 2
+"module+" = 1
+struct = 1
+for = 1
+"for*" = 1
+"for/list" = 1
+"for/vector" = 1
+"for/hash" = 1
+"for/fold" = 2
+"for/and" = 1
+"for/or" = 1
+"for/sum" = 1
+"for/first" = 1
+"for*/list" = 1
+match = 1
+match-let = 1
+with-handlers = 1
+syntax-parse = 1
+define-syntax-rule = 1
