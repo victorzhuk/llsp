@@ -12,7 +12,7 @@ tasks:
   test:
     desc: Run all tests with a wall-clock timeout and a thread cap
     cmds:
-      - timeout 5m cargo test --locked --all-targets -- --test-threads={{.TEST_THREADS}}
+      - timeout 5m cargo test --locked -- --test-threads={{.TEST_THREADS}}
 
   lint:
     desc: Check formatting and clippy

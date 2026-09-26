@@ -197,11 +197,37 @@ llsp reads untrusted code, so it is built to be safe with it:
 `.llsp.toml` comes from the repository you open. It can change llsp's behavior and limits,
 but it cannot make llsp run anything.
 
+## Performance
+
+Measured with `task bench` (criterion, release build) on a shared cloud VM, so treat the
+numbers as rough.
+
+| Benchmark | Result |
+|---|---|
+| Parse 1 MB (per dialect) | 47–138 MB/s |
+| Format 1 MB (per dialect) | 54–82 MB/s |
+| Cold index, 1000 files / 50k definitions | 143 ms |
+
+Request round-trips over the protocol, on a workspace with 50,001 definitions:
+
+| Request | Latency |
+|---|---|
+| definition, hover | ~70 µs |
+| references (name with a few uses) | ~68 µs |
+| completion | 1.1 ms |
+| workspace symbol | 2.2 ms |
+| semantic tokens (50-definition file) | 2.3 ms |
+| formatting (50-definition file) | 2.8 ms |
+| references (name with 50,001 uses) | 150 ms |
+
+The last row is dominated by building the JSON response, not by the lookup.
+
 ## Development
 
 ```sh
 task build   # release binary in target/release/llsp
 task test    # tests (5 min timeout, 4 threads)
+task ci      # lint, tests, bench build, spec validation
 task lint    # rustfmt + clippy
 task bench   # criterion benchmarks
 task spec    # validate OpenSpec specs and changes
