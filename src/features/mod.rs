@@ -5,6 +5,7 @@ mod structure;
 mod symbols;
 
 pub(crate) use structure::legend;
+pub(crate) use symbols::score_lowercase;
 
 use lsp_types::{Location, Position, Range, Uri};
 
@@ -26,7 +27,7 @@ pub(crate) enum Sym {
 impl Server {
     pub(crate) fn document(&self, uri: &Uri) -> Option<(Uri, &Document)> {
         let key = normalize_uri(uri);
-        let doc = self.docs.get(&key)?;
+        let doc = self.docs.get(&key).filter(|d| !d.oversized())?;
         Some((key, doc))
     }
 
@@ -53,14 +54,26 @@ impl Server {
 
     /// Location in an indexed file, using live positions for open documents.
     pub(crate) fn location(&self, file: &FileSummary, start: u32, end: u32) -> Location {
-        if let Some(doc) = self.docs.get(&file.uri) {
-            return Location::new(doc.client_uri.clone(), doc.range(start, end, self.enc));
+        self.locator(file)(start, end)
+    }
+
+    /// Builds locations in one file, looking up its open document once.
+    pub(crate) fn locator<'a>(
+        &'a self,
+        file: &'a FileSummary,
+    ) -> impl Fn(u32, u32) -> Location + 'a {
+        let doc = self.docs.get(&file.uri);
+        let enc = self.enc;
+        move |start, end| match doc {
+            Some(doc) => Location::new(doc.client_uri.clone(), doc.range(start, end, enc)),
+            None => Location::new(
+                file.uri.clone(),
+                Range::new(
+                    lines_position(&file.lines, start, enc),
+                    lines_position(&file.lines, end, enc),
+                ),
+            ),
         }
-        let range = Range::new(
-            lines_position(&file.lines, start, self.enc),
-            lines_position(&file.lines, end, self.enc),
-        );
-        Location::new(file.uri.clone(), range)
     }
 
     /// Indexed files that share the dialect of `doc`.

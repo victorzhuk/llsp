@@ -85,21 +85,30 @@ impl Server {
             }
             Sym::Global { key, .. } => {
                 let same = self.same_dialect(doc);
-                let mut refs: Vec<_> = self
+                let mut files: Vec<_> = self
                     .index
-                    .refs_named(&key)
-                    .filter(|(f, _)| same(f))
-                    .filter(|(f, (s, _))| {
-                        include_decl
-                            || !f
-                                .defs_named(&key)
-                                .any(|d| d.name_start <= *s && *s < d.name_end)
-                    })
+                    .files()
+                    .filter(|f| same(f) && f.refs.contains_key(&key))
                     .collect();
-                refs.sort_by(|a, b| (a.0.uri.as_str(), a.1).cmp(&(b.0.uri.as_str(), b.1)));
-                refs.into_iter()
-                    .map(|(f, (s, e))| self.location(f, s, e))
-                    .collect()
+                files.sort_by(|a, b| a.uri.as_str().cmp(b.uri.as_str()));
+                let mut out = Vec::new();
+                for f in files {
+                    let decls: Vec<(u32, u32)> = if include_decl {
+                        Vec::new()
+                    } else {
+                        f.defs_named(&key)
+                            .map(|d| (d.name_start, d.name_end))
+                            .collect()
+                    };
+                    let loc = self.locator(f);
+                    out.extend(
+                        f.refs[&key]
+                            .iter()
+                            .filter(|(s, _)| !decls.iter().any(|&(ds, de)| ds <= *s && *s < de))
+                            .map(|&(s, e)| loc(s, e)),
+                    );
+                }
+                out
             }
         };
         Ok(Some(locations))

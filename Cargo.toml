@@ -2,7 +2,7 @@
 name = "llsp"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Fast, static language server for Lisp dialects"
 license = "Apache-2.0"
 repository = "https://github.com/victorzhuk/llsp"
@@ -55,4 +55,8 @@ harness = false
 
 [[bench]]
 name = "format"
+harness = false
+
+[[bench]]
+name = "workspace"
 harness = false

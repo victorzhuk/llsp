@@ -127,6 +127,36 @@ impl Tree {
         parser::parse(text, dialect)
     }
 
+    /// Keeps `text` without reading it: one whitespace token, no forms.
+    pub fn unparsed(text: String) -> Tree {
+        let tokens = if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![Token {
+                kind: TokenKind::Whitespace,
+                start: 0,
+                end: text.len() as u32,
+            }]
+        };
+        let root = Node {
+            kind: NodeKind::Root,
+            start: 0,
+            end: text.len() as u32,
+            parent: Tree::ROOT,
+            token: 0,
+            children: 0,
+            child_count: 0,
+            closed: true,
+        };
+        Tree {
+            text,
+            tokens,
+            nodes: vec![root],
+            child_ids: Vec::new(),
+            errors: Vec::new(),
+        }
+    }
+
     pub fn into_text(self) -> String {
         self.text
     }

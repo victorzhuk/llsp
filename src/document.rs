@@ -26,21 +26,42 @@ pub struct Document {
     tree: Tree,
     lines: LineIndex,
     analysis: Analysis,
+    max_size: u64,
 }
 
 impl Document {
-    pub fn new(text: String, version: i32, dialect: Arc<Dialect>) -> Self {
+    /// Texts over `max_size` bytes are kept but not read or analyzed.
+    pub fn new(text: String, version: i32, dialect: Arc<Dialect>, max_size: u64) -> Self {
         let lines = LineIndex::new(&text);
-        let tree = Tree::parse(text, &dialect);
-        let analysis = Analysis::new(&tree, &dialect);
-        Self {
+        let mut doc = Self {
             version,
             client_uri: Uri::from_str("untitled:llsp").expect("valid URI"),
             dialect,
-            tree,
+            tree: Tree::unparsed(String::new()),
             lines,
-            analysis,
+            analysis: Analysis::default(),
+            max_size,
+        };
+        doc.reparse(text);
+        doc
+    }
+
+    fn reparse(&mut self, text: String) {
+        if self.oversized_text(&text) {
+            self.tree = Tree::unparsed(text);
+            self.analysis = Analysis::default();
+        } else {
+            self.tree = Tree::parse(text, &self.dialect);
+            self.analysis = Analysis::new(&self.tree, &self.dialect);
         }
+    }
+
+    fn oversized_text(&self, text: &str) -> bool {
+        text.len() as u64 > self.max_size
+    }
+
+    pub fn oversized(&self) -> bool {
+        self.oversized_text(self.text())
     }
 
     pub fn text(&self) -> &str {
@@ -61,8 +82,7 @@ impl Document {
         version: i32,
         enc: Encoding,
     ) {
-        let empty = Tree::parse(String::new(), &self.dialect);
-        let mut text = std::mem::replace(&mut self.tree, empty).into_text();
+        let mut text = std::mem::replace(&mut self.tree, Tree::unparsed(String::new())).into_text();
         for change in changes {
             match change.range {
                 Some(range) => {
@@ -75,8 +95,7 @@ impl Document {
             self.lines = LineIndex::new(&text);
         }
         self.version = version;
-        self.tree = Tree::parse(text, &self.dialect);
-        self.analysis = Analysis::new(&self.tree, &self.dialect);
+        self.reparse(text);
     }
 
     pub fn analysis(&self) -> &Analysis {
@@ -241,7 +260,12 @@ mod tests {
 
     fn doc(text: &str) -> Document {
         let d = crate::dialect::Dialects::builtin();
-        Document::new(text.into(), 0, d.get("common-lisp").unwrap().clone())
+        Document::new(
+            text.into(),
+            0,
+            d.get("common-lisp").unwrap().clone(),
+            u64::MAX,
+        )
     }
 
     fn change(
@@ -283,6 +307,19 @@ mod tests {
         assert_eq!(d.text(), ";; c\nx\n(z)\n");
         d.apply_changes(vec![change(None, "new")], 2, Encoding::Utf8);
         assert_eq!(d.text(), "new");
+    }
+
+    #[test]
+    fn oversized_is_kept_unparsed() {
+        let d = crate::dialect::Dialects::builtin();
+        let cl = d.get("common-lisp").unwrap().clone();
+        let mut doc = Document::new("(defun f ())".into(), 0, cl, 5);
+        assert!(doc.oversized());
+        assert_eq!(doc.text(), "(defun f ())");
+        assert!(doc.analysis().defs.is_empty());
+        doc.apply_changes(vec![change(None, "(a)")], 1, Encoding::Utf8);
+        assert!(!doc.oversized());
+        assert_eq!(doc.tree().children(Tree::ROOT).len(), 1);
     }
 
     #[test]

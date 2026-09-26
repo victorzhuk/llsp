@@ -249,3 +249,24 @@ fn format_check_and_write() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(json(&out), serde_json::json!([]));
 }
+
+#[cfg(unix)]
+#[test]
+fn log_file_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("llsp.log");
+    let out = llsp(
+        dir.path(),
+        &[
+            "--log-file",
+            log.to_str().unwrap(),
+            "--log-level",
+            "info",
+            "config",
+        ],
+    );
+    assert!(out.status.success());
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}

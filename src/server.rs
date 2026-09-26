@@ -428,6 +428,15 @@ impl Server {
         });
     }
 
+    fn warn_oversized(&self, doc: &Document) {
+        self.show_warning(format!(
+            "llsp: {} is {} bytes, over files.max_file_size ({}); analysis disabled",
+            doc.client_uri.as_str(),
+            doc.text().len(),
+            self.settings.config.files.max_file_size
+        ));
+    }
+
     fn did_open(&mut self, p: lsp_types::DidOpenTextDocumentParams) {
         let doc = p.text_document;
         let uri = normalize_uri(&doc.uri);
@@ -435,8 +444,12 @@ impl Server {
         let dialect = self
             .settings
             .detect(path.as_deref(), Some(&doc.language_id), &doc.text);
-        let mut document = Document::new(doc.text, doc.version, dialect);
+        let max = self.settings.config.files.max_file_size;
+        let mut document = Document::new(doc.text, doc.version, dialect, max);
         document.client_uri = doc.uri;
+        if document.oversized() {
+            self.warn_oversized(&document);
+        }
         self.docs.insert(uri.clone(), document);
         self.document_changed(&uri);
     }
@@ -447,7 +460,12 @@ impl Server {
             log::warn!("change for unopened document {}", uri.as_str());
             return;
         };
+        let was_oversized = doc.oversized();
         doc.apply_changes(p.content_changes, p.text_document.version, self.enc);
+        if doc.oversized() && !was_oversized {
+            let doc = &self.docs[&uri];
+            self.warn_oversized(doc);
+        }
         self.document_changed(&uri);
     }
 
@@ -524,7 +542,8 @@ impl Server {
             let doc = &self.docs[&uri];
             let path = uri_to_path(&uri);
             let dialect = self.settings.detect(path.as_deref(), None, doc.text());
-            let mut fresh = Document::new(doc.text().to_owned(), doc.version, dialect);
+            let max = self.settings.config.files.max_file_size;
+            let mut fresh = Document::new(doc.text().to_owned(), doc.version, dialect, max);
             fresh.client_uri = doc.client_uri.clone();
             self.docs.insert(uri.clone(), fresh);
             self.publish_diagnostics(&uri);

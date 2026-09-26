@@ -174,6 +174,29 @@ The built-in dialect definitions live in [`dialects/`](dialects). A dialect defi
 - **Indentation specs**
 - **Special forms and builtins**
 
+## Security model
+
+llsp reads untrusted code, so it is built to be safe with it:
+
+- **Never executes code:** no evaluation, compilation, macro expansion, reader macros (`#.`,
+  `#=`), build tools or subprocesses. Everything comes from syntax and the dialect data.
+- **No network:** the only socket is the LSP listener you ask for with `--listen`, and it
+  must be a loopback address.
+- **Stays in the workspace:** indexing walks the workspace roots without following symlinks.
+  Watched-file events for paths outside the roots are ignored.
+- **Bounded resources:**
+  - files over `files.max_file_size` are not indexed; open documents over it are kept but
+    not analyzed, and you get a warning
+  - `workspace.max_files` caps indexing
+  - the reader is iterative, so deep nesting cannot overflow the stack
+  - syntax errors are capped at 100 per file
+- **Private logs:** logs never contain document text. Log files are created with mode 0600.
+- **Tested for robustness:** property tests feed random text in every dialect and call every
+  request at random positions over the real protocol.
+
+`.llsp.toml` comes from the repository you open. It can change llsp's behavior and limits,
+but it cannot make llsp run anything.
+
 ## Development
 
 ```sh
