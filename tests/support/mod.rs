@@ -198,6 +198,7 @@ impl Workspace {
         let lang = match rel.rsplit('.').next() {
             Some("clj") => "clojure",
             Some("scm") => "scheme",
+            Some("el") => "emacs-lisp",
             _ => "lisp",
         };
         c.open(&self.uri(rel), lang, &self.text(rel));

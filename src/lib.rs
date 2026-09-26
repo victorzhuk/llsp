@@ -4,6 +4,7 @@ pub mod diagnostics;
 pub mod dialect;
 pub mod document;
 mod features;
+pub mod format;
 pub mod server;
 pub mod syntax;
 pub mod workspace;

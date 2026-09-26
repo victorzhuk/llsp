@@ -191,6 +191,8 @@ fn capabilities(enc: Encoding) -> ServerCapabilities {
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
+        document_range_formatting_provider: Some(OneOf::Left(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             SemanticTokensOptions {
@@ -328,6 +330,10 @@ impl Server {
                 self.handle::<req::SignatureHelpRequest>(id, params, Self::signature_help)
             }
             req::HoverRequest::METHOD => self.handle::<req::HoverRequest>(id, params, Self::hover),
+            req::Formatting::METHOD => self.handle::<req::Formatting>(id, params, Self::formatting),
+            req::RangeFormatting::METHOD => {
+                self.handle::<req::RangeFormatting>(id, params, Self::range_formatting)
+            }
             req::FoldingRangeRequest::METHOD => {
                 self.handle::<req::FoldingRangeRequest>(id, params, Self::folding_ranges)
             }

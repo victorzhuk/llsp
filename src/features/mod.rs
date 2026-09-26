@@ -1,4 +1,5 @@
 mod assist;
+mod formatting;
 mod navigation;
 mod structure;
 mod symbols;

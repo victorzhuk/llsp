@@ -54,6 +54,16 @@ enum Command {
         #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
         format: OutputFormat,
     },
+    /// Re-indent files in place, or list files that would change with --check.
+    Format {
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// Only report files that would change; exit 1 if any.
+        #[arg(long)]
+        check: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
+        format: OutputFormat,
+    },
     /// Print the effective configuration.
     Config {
         #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
@@ -110,6 +120,11 @@ fn run(cli: Cli) -> Result<ExitCode> {
     match command {
         Command::Serve { listen, .. } => serve(layers, listen),
         Command::Check { paths, format } => check(&settings, &paths, format.json()),
+        Command::Format {
+            paths,
+            check,
+            format,
+        } => format_files(&settings, &paths, check, format.json()),
         Command::Config { format } => {
             let out = if format.json() {
                 serde_json::to_string_pretty(&settings.config)?
@@ -263,6 +278,63 @@ fn check(settings: &Settings, paths: &[PathBuf], json: bool) -> Result<ExitCode>
     Ok(if io_error {
         ExitCode::from(2)
     } else if reports.iter().any(|r| r.severity == Severity::Error) {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn format_files(
+    settings: &Settings,
+    paths: &[PathBuf],
+    check: bool,
+    json: bool,
+) -> Result<ExitCode> {
+    let mut changed = Vec::new();
+    let mut io_error = false;
+    for path in collect_files(settings, paths) {
+        let text = match read_limited(&path, settings.config.files.max_file_size) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("llsp: {}: {e:#}", path.display());
+                io_error = true;
+                continue;
+            }
+        };
+        let dialect = settings.detect(Some(&path), None, &text);
+        let tree = Tree::parse(text, &dialect);
+        let analysis = Analysis::new(&tree, &dialect);
+        let hints = |key: &str| {
+            analysis
+                .defs
+                .iter()
+                .filter(|d| d.key == key)
+                .find_map(|d| d.indent)
+        };
+        let edits = llsp::format::format(&tree, &dialect, &settings.config.format, &hints, None);
+        if edits.is_empty() {
+            continue;
+        }
+        if !check {
+            let out = llsp::format::apply(tree.text(), &edits);
+            if let Err(e) = std::fs::write(&path, out) {
+                eprintln!("llsp: {}: {e}", path.display());
+                io_error = true;
+                continue;
+            }
+        }
+        changed.push(path.display().to_string());
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&changed)?);
+    } else {
+        for p in &changed {
+            println!("{p}");
+        }
+    }
+    Ok(if io_error {
+        ExitCode::from(2)
+    } else if check && !changed.is_empty() {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
