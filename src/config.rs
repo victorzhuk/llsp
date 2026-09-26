@@ -15,6 +15,7 @@ const RESERVED_ENV: &[&str] = &["LLSP_CONFIG", "LLSP_LOG"];
 pub struct Config {
     pub files: Files,
     pub workspace: Workspace,
+    pub completion: Completion,
     pub format: Format,
     pub log: Log,
     pub dialects: toml::Table,
@@ -61,6 +62,22 @@ impl Default for Workspace {
             ],
             max_files: 20_000,
             max_symbols: 256,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Completion {
+    pub max_items: usize,
+    pub builtins: bool,
+}
+
+impl Default for Completion {
+    fn default() -> Self {
+        Self {
+            max_items: 200,
+            builtins: true,
         }
     }
 }
@@ -327,6 +344,8 @@ mod tests {
         assert_eq!(s.config.format.body_indent, 2);
         assert_eq!(s.config.files.default_dialect, "common-lisp");
         assert!(s.config.workspace.index);
+        assert_eq!(s.config.completion.max_items, 200);
+        assert!(s.config.completion.builtins);
     }
 
     #[test]

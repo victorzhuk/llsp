@@ -228,17 +228,23 @@ impl Tree {
             .min(self.tokens.len().saturating_sub(1))
     }
 
-    /// True when `offset` sits inside a string, character, or comment token.
+    /// True when `offset` sits inside a string or comment, including at the end of a
+    /// line comment or an unterminated literal.
     pub fn in_literal_or_comment(&self, offset: u32) -> bool {
-        let Some(t) = self.tokens.get(self.token_index_at(offset)) else {
+        let i = self.tokens.partition_point(|t| t.end < offset);
+        let Some(t) = self.tokens.get(i) else {
             return false;
         };
-        t.start < offset
-            && offset < t.end
-            && matches!(
-                t.kind,
-                TokenKind::String | TokenKind::LineComment | TokenKind::BlockComment
-            )
+        if t.start >= offset {
+            return false;
+        }
+        match t.kind {
+            TokenKind::LineComment => true,
+            TokenKind::String | TokenKind::BlockComment => {
+                offset < t.end || self.errors.iter().any(|e| e.start == t.start)
+            }
+            _ => false,
+        }
     }
 
     /// Walks all nodes in document order without recursion.

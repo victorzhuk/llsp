@@ -53,3 +53,11 @@ SHALL map globs to dialect names; `files.default_dialect` names the fallback.
 #### Scenario: Cap
 - **WHEN** `workspace.max_symbols = 2` and the query matches five definitions
 - **THEN** two results are returned
+
+### Requirement: Completion settings
+`completion.max_items` (default 200) SHALL cap completion results and `completion.builtins`
+(default true) SHALL control whether dialect special forms and builtins are offered.
+
+#### Scenario: Builtins disabled
+- **WHEN** `completion.builtins = false` and completing `ca` in Common Lisp
+- **THEN** `car` is not offered unless defined in the workspace
