@@ -1,0 +1,5 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"fennel\", \"(local f #(+ $1 1)) {:a [1]}\"))"
+---
+Root[List(Paren)[Atom"local" Atom"f" Prefix"#"[List(Paren)[Atom"+" Atom"$1" Atom"1"]]] List(Brace)[Atom":a" List(Bracket)[Atom"1"]]]

@@ -1,0 +1,142 @@
+extensions = ["el"]
+language_ids = ["emacs-lisp", "elisp"]
+modeline_names = ["emacs-lisp", "elisp", "lisp-interaction"]
+case_sensitive = true
+namespace_separators = []
+keyword_prefixes = [":"]
+namespace_forms = []
+def_prefixes = ["def", "cl-def", "define-"]
+pattern_ignore = ["&optional", "&rest", "&key", "&body", "&aux", "&allow-other-keys", "."]
+constants = ["nil", "t"]
+special_forms = [
+  "and", "catch", "cond", "condition-case", "defconst", "defvar", "function", "if",
+  "interactive", "lambda", "let", "let*", "or", "prog1", "prog2", "progn", "quote",
+  "save-current-buffer", "save-excursion", "save-restriction", "setq", "setq-default",
+  "unwind-protect", "while", "defun", "defmacro", "defsubst", "defcustom", "defgroup",
+  "defface", "defalias", "defvar-local", "define-minor-mode", "define-derived-mode",
+  "cl-defun", "cl-defmacro", "cl-defstruct", "cl-defgeneric", "cl-defmethod", "when",
+  "unless", "dolist", "dotimes", "pcase", "pcase-let", "pcase-dolist", "if-let", "when-let",
+  "if-let*", "when-let*", "and-let*", "cl-loop", "cl-case", "cl-flet", "cl-labels",
+  "cl-letf", "ignore-errors", "with-current-buffer", "with-temp-buffer", "declare",
+  "require", "provide", "push", "pop", "setf", "cl-incf", "cl-decf", "seq-let",
+]
+builtins = [
+  "car", "cdr", "cons", "list", "append", "reverse", "nreverse", "length", "nth", "nthcdr",
+  "last", "butlast", "member", "memq", "assoc", "assq", "alist-get", "plist-get",
+  "plist-put", "mapcar", "mapc", "mapconcat", "seq-filter", "seq-map", "seq-reduce",
+  "seq-find", "seq-remove", "funcall", "apply", "identity", "format", "message", "error",
+  "user-error", "signal", "concat", "substring", "string-match", "match-string",
+  "replace-regexp-in-string", "split-string", "string-join", "string-trim",
+  "string-prefix-p", "string-suffix-p", "string-empty-p", "number-to-string",
+  "string-to-number", "symbol-name", "intern", "make-symbol", "symbol-value",
+  "symbol-function", "boundp", "fboundp", "eq", "eql", "equal", "not", "null", "consp",
+  "listp", "stringp", "symbolp", "numberp", "integerp", "functionp", "+", "-", "*", "/",
+  "=", "<", ">", "<=", ">=", "1+", "1-", "max", "min", "abs", "mod", "%", "insert",
+  "point", "point-min", "point-max", "goto-char", "forward-line", "beginning-of-line",
+  "end-of-line", "buffer-string", "buffer-substring", "buffer-name", "current-buffer",
+  "set-buffer", "get-buffer-create", "kill-buffer", "re-search-forward",
+  "re-search-backward", "search-forward", "looking-at", "add-hook", "remove-hook",
+  "run-hooks", "define-key", "keymap-set", "global-set-key", "kbd", "make-hash-table",
+  "gethash", "puthash", "remhash", "maphash", "vector", "aref", "aset", "make-vector",
+  "eval", "load", "featurep", "called-interactively-p", "prin1", "princ", "print",
+  "file-exists-p", "expand-file-name", "file-name-directory", "file-name-nondirectory",
+]
+
+[reader]
+brackets = ["()", "[]"]
+line_comment = ";"
+char_prefix = "?"
+char_escape = true
+symbol_escape = true
+terminators = "'`,"
+sharp_dispatch = true
+
+[reader.prefixes]
+"'" = 1
+"`" = 1
+"," = 1
+",@" = 1
+"#'" = 1
+
+[defs]
+defun = { kind = "function", params = 2 }
+defmacro = { kind = "macro", params = 2 }
+defsubst = { kind = "function", params = 2 }
+define-inline = { kind = "function", params = 2 }
+cl-defun = { kind = "function", params = 2 }
+cl-defmacro = { kind = "macro", params = 2 }
+cl-defgeneric = { kind = "interface", params = 2 }
+cl-defmethod = { kind = "method" }
+cl-defstruct = { kind = "struct" }
+defvar = { kind = "variable", doc = 3 }
+defvar-local = { kind = "variable", doc = 3 }
+defconst = { kind = "constant", doc = 3 }
+defcustom = { kind = "variable", doc = 3 }
+defface = { kind = "variable", doc = 3 }
+defgroup = { kind = "module", doc = 3 }
+defalias = { kind = "function", doc = 3 }
+define-minor-mode = { kind = "function" }
+define-derived-mode = { kind = "function" }
+ert-deftest = { kind = "test", params = 2 }
+
+[bindings]
+let = "let"
+"let*" = "let"
+if-let = "let"
+when-let = "let"
+"if-let*" = "let"
+"when-let*" = "let"
+"and-let*" = "let"
+pcase-let = "let"
+"pcase-let*" = "let"
+cl-letf = "let"
+lambda = "lambda"
+dolist = "single"
+dotimes = "single"
+pcase-dolist = "single"
+condition-case = "bind"
+cl-destructuring-bind = "bind"
+seq-let = "bind"
+cl-flet = "flet"
+cl-labels = "flet"
+
+[indent]
+defun = 2
+defmacro = 2
+defsubst = 2
+cl-defun = 2
+cl-defmacro = 2
+cl-defmethod = 2
+lambda = 1
+let = 1
+"let*" = 1
+if-let = 2
+when-let = 1
+"if-let*" = 2
+"when-let*" = 1
+if = 2
+when = 1
+unless = 1
+while = 1
+dolist = 1
+dotimes = 1
+progn = 0
+prog1 = 1
+prog2 = 2
+save-excursion = 0
+save-restriction = 0
+save-current-buffer = 0
+unwind-protect = 1
+condition-case = 2
+catch = 1
+pcase = 1
+with-current-buffer = 1
+with-temp-buffer = 0
+cl-flet = 1
+cl-labels = 1
+cl-letf = 1
+
+[indent_prefixes]
+"def" = 2
+"with-" = 1
+"cl-def" = 2

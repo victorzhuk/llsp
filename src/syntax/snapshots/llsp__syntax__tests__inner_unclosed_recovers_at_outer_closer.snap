@@ -1,0 +1,6 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"clojure\", \"[(a b] c\"))"
+---
+Root[List(Bracket)[List(Paren)![Atom"a" Atom"b"]] Atom"c"]
+unclosed-delimiter@1..2

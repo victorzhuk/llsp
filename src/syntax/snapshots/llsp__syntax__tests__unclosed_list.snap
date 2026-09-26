@@ -1,0 +1,6 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\", \"(defun f (x)\"))"
+---
+Root[List(Paren)![Atom"defun" Atom"f" List(Paren)[Atom"x"]]]
+unclosed-delimiter@0..1

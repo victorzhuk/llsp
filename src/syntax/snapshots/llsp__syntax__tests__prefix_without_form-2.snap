@@ -1,0 +1,6 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\", \"'(a\"))"
+---
+Root[Prefix"'"[List(Paren)![Atom"a"]]]
+unclosed-delimiter@1..2

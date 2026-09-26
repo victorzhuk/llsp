@@ -1,0 +1,6 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"common-lisp\", \"#| a\"))"
+---
+Root[]
+unterminated-comment@0..2

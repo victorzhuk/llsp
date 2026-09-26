@@ -1,0 +1,85 @@
+extensions = ["fnl"]
+language_ids = ["fennel"]
+modeline_names = ["fennel"]
+case_sensitive = true
+namespace_separators = []
+keyword_prefixes = [":"]
+namespace_forms = []
+def_prefixes = []
+pattern_ignore = ["&", "&as", "_"]
+constants = ["nil", "true", "false"]
+special_forms = [
+  "fn", "lambda", "λ", "let", "local", "var", "global", "set", "tset", "if", "when", "do",
+  "each", "for", "while", "icollect", "collect", "accumulate", "faccumulate", "fcollect",
+  "match", "case", "match-try", "case-try", "macro", "macros", "import-macros",
+  "require-macros", "eval-compiler", "->", "->>", "-?>", "-?>>", "doto", "partial", "pick-values",
+  "values", "length", "and", "or", "not", "quote", "hashfn", "with-open", "comment",
+]
+builtins = [
+  "print", "pairs", "ipairs", "next", "type", "tostring", "tonumber", "select", "unpack",
+  "table.insert", "table.remove", "table.concat", "table.sort", "table.unpack",
+  "string.format", "string.sub", "string.find", "string.gsub", "string.match",
+  "string.gmatch", "string.len", "string.lower", "string.upper", "string.rep",
+  "math.floor", "math.ceil", "math.max", "math.min", "math.abs", "math.random",
+  "math.huge", "io.write", "io.read", "io.open", "os.time", "os.date", "os.getenv",
+  "require", "error", "assert", "pcall", "xpcall", "setmetatable", "getmetatable",
+  "rawget", "rawset", "rawequal", "rawlen", "coroutine.create", "coroutine.resume",
+  "coroutine.yield", "coroutine.wrap", "+", "-", "*", "/", "//", "%", "^", "=", "not=",
+  "<", ">", "<=", ">=", "..",
+]
+
+[reader]
+brackets = ["()", "[]", "{}"]
+line_comment = ";"
+terminators = "'`,"
+sharp_dispatch = true
+
+[reader.prefixes]
+"'" = 1
+"`" = 1
+"," = 1
+
+[defs]
+fn = { kind = "function", params = 2 }
+lambda = { kind = "function", params = 2 }
+"λ" = { kind = "function", params = 2 }
+macro = { kind = "macro", params = 2 }
+local = { kind = "variable" }
+var = { kind = "variable" }
+global = { kind = "variable" }
+
+[bindings]
+let = "let-vector"
+each = "single"
+for = "single"
+icollect = "single"
+collect = "single"
+fcollect = "single"
+accumulate = "single"
+faccumulate = "single"
+with-open = "let-vector"
+lambda = "fn"
+"λ" = "fn"
+fn = "fn"
+
+[indent]
+fn = 2
+lambda = 2
+"λ" = 2
+macro = 2
+let = 1
+each = 1
+for = 1
+icollect = 1
+collect = 1
+fcollect = 1
+accumulate = 1
+faccumulate = 1
+while = 1
+when = 1
+match = 1
+case = 1
+with-open = 1
+do = 0
+
+[indent_prefixes]

@@ -1,0 +1,6 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"scheme\", \"a) b\"))"
+---
+Root[Atom"a" Atom"b"]
+unexpected-closer@1..2

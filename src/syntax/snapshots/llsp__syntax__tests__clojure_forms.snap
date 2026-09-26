@@ -1,0 +1,5 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"clojure\",\n\"(ns a.b) #_ (foo) {:a 1, :b [\\\\a \\\\newline]} ^:private #{x} @r #\\\"re\\\" #?(:clj 1) ~@xs\"))"
+---
+Root[List(Paren)[Atom"ns" Atom"a.b"] DatumComment[List(Paren)[Atom"foo"]] List(Brace)[Atom":a" Atom"1" Atom":b" List(Bracket)[Char"\\a" Char"\\newline"]] Prefix"^"[Atom":private" Prefix"#"[List(Brace)[Atom"x"]]] Prefix"@"[Atom"r"] Prefix"#"[Str"\"re\""] Prefix"#?"[List(Paren)[Atom":clj" Atom"1"]] Prefix"~@"[Atom"xs"]]

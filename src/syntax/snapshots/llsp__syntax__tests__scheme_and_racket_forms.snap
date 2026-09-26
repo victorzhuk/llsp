@@ -1,0 +1,5 @@
+---
+source: src/syntax/tests.rs
+expression: "dump(&parse(\"racket\",\n\"#lang racket\\n(define (f x) #;(ignored) [let ([y #t]) #\\\\space]) #hash((a . 1)) #:kw\"))"
+---
+Root[Atom"#lang" Atom"racket" List(Paren)[Atom"define" List(Paren)[Atom"f" Atom"x"] DatumComment[List(Paren)[Atom"ignored"]] List(Bracket)[Atom"let" List(Paren)[List(Bracket)[Atom"y" Atom"#t"]] Char"#\\space"]] Prefix"#hash"[List(Paren)[List(Paren)[Atom"a" Atom"." Atom"1"]]] Atom"#:kw"]
