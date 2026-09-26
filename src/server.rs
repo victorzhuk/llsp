@@ -6,11 +6,12 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestI
 use lsp_types::notification::{self as notif, Notification as _};
 use lsp_types::request::{self as req, Request as _};
 use lsp_types::{
-    DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher, GlobPattern,
-    InitializeParams, InitializeResult, MessageType, OneOf, PositionEncodingKind,
-    PublishDiagnosticsParams, Registration, RegistrationParams, RenameOptions, ServerCapabilities,
-    ServerInfo, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
+    CompletionOptions, DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher,
+    GlobPattern, HoverProviderCapability, InitializeParams, InitializeResult, MessageType, OneOf,
+    PositionEncodingKind, PublishDiagnosticsParams, Registration, RegistrationParams,
+    RenameOptions, ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelpOptions,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Uri,
 };
 use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
@@ -174,6 +175,16 @@ fn capabilities(enc: Encoding) -> ServerCapabilities {
             prepare_provider: Some(true),
             work_done_progress_options: Default::default(),
         })),
+        completion_provider: Some(CompletionOptions {
+            trigger_characters: Some(vec!["/".into(), ":".into()]),
+            ..Default::default()
+        }),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec![" ".into(), "(".into()]),
+            retrigger_characters: None,
+            work_done_progress_options: Default::default(),
+        }),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         ..Default::default()
     }
 }
@@ -288,6 +299,11 @@ impl Server {
                 self.handle::<req::PrepareRenameRequest>(id, params, Self::prepare_rename)
             }
             req::Rename::METHOD => self.handle::<req::Rename>(id, params, Self::rename),
+            req::Completion::METHOD => self.handle::<req::Completion>(id, params, Self::completion),
+            req::SignatureHelpRequest::METHOD => {
+                self.handle::<req::SignatureHelpRequest>(id, params, Self::signature_help)
+            }
+            req::HoverRequest::METHOD => self.handle::<req::HoverRequest>(id, params, Self::hover),
             _ => Response::new_err(
                 id,
                 ErrorCode::MethodNotFound as i32,

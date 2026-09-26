@@ -1,3 +1,4 @@
+mod assist;
 mod navigation;
 mod symbols;
 

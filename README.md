@@ -18,6 +18,11 @@ Fast, static language server for Lisp dialects, written in Rust.
 - Go to definition, find references, document highlights, for locals (with shadowing) and
   workspace names (namespaces and aliases taken into account)
 - Rename, both local and across the workspace, with validation of the new name
+- Completion: visible locals, workspace definitions, dialect special forms and builtins, with
+  fuzzy ranking; `ns/`, `pkg:` and alias prefixes narrow to that namespace
+- Signature help that picks the matching arity and understands lambda-list markers
+  (`&optional`, `&rest`, `&`)
+- Hover with signature, kind, namespace, docstring and location
 
 ## Install
 
@@ -86,6 +91,10 @@ index = true
 exclude = ["**/node_modules/**", "**/target/**"]
 max_files = 20000
 max_symbols = 256                 # workspace/symbol result cap
+
+[completion]
+max_items = 200
+builtins = true                   # offer dialect special forms and builtins
 
 [format]
 body_indent = 2
