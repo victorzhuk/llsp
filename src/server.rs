@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
+use crossbeam_channel::{Receiver, Sender, select};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{self as notif, Notification as _};
+use lsp_types::request::{self as req, Request as _};
 use lsp_types::{
+    DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher, GlobPattern,
     InitializeParams, InitializeResult, MessageType, PositionEncodingKind,
-    PublishDiagnosticsParams, ServerCapabilities, ServerInfo, ShowMessageParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    PublishDiagnosticsParams, Registration, RegistrationParams, ServerCapabilities, ServerInfo,
+    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Uri,
 };
 use rustc_hash::FxHashMap;
@@ -14,16 +17,25 @@ use serde::de::DeserializeOwned;
 
 use crate::config::{Layers, Settings, json_to_table};
 use crate::diagnostics::{self, Severity};
-use crate::document::{Document, Encoding, uri_to_path};
+use crate::document::{Document, Encoding, normalize_uri, uri_to_path};
+use crate::workspace::{self, FileSummary, Index};
 
 pub struct Server {
     conn: Connection,
     layers: Layers,
-    settings: Settings,
-    enc: Encoding,
-    #[allow(dead_code)]
+    pub(crate) settings: Settings,
+    pub(crate) enc: Encoding,
     roots: Vec<PathBuf>,
-    docs: FxHashMap<Uri, Document>,
+    pub(crate) docs: FxHashMap<Uri, Document>,
+    pub(crate) index: Index,
+    events: (Sender<Event>, Receiver<Event>),
+    scan_generation: u64,
+    watch_files: bool,
+    next_request: i32,
+}
+
+enum Event {
+    Indexed(u64, Vec<FileSummary>),
 }
 
 /// Runs the protocol until `exit`. Returns whether `shutdown` was received first.
@@ -61,14 +73,28 @@ pub fn run(conn: Connection, mut layers: Layers) -> Result<bool> {
     };
     conn.initialize_finish(id, serde_json::to_value(result)?)?;
 
+    let watch_files = params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|w| w.did_change_watched_files.as_ref())
+        .and_then(|w| w.dynamic_registration)
+        .unwrap_or(false);
     let mut server = Server {
         conn,
         layers,
         settings,
         enc,
-        roots,
+        roots: roots.iter().filter_map(|r| r.canonicalize().ok()).collect(),
         docs: FxHashMap::default(),
+        index: Index::default(),
+        events: crossbeam_channel::unbounded(),
+        scan_generation: 0,
+        watch_files,
+        next_request: 0,
     };
+    server.register_watchers();
+    server.start_scan();
     server.main_loop()
 }
 
@@ -122,20 +148,92 @@ fn capabilities(enc: Encoding) -> ServerCapabilities {
 
 impl Server {
     fn main_loop(&mut self) -> Result<bool> {
-        while let Ok(msg) = self.conn.receiver.recv() {
-            match msg {
-                Message::Request(req) => {
-                    if self.conn.handle_shutdown(&req)? {
-                        return Ok(true);
+        let events = self.events.1.clone();
+        loop {
+            select! {
+                recv(self.conn.receiver) -> msg => {
+                    let Ok(msg) = msg else { return Ok(false) };
+                    match msg {
+                        Message::Request(req) => {
+                            if self.conn.handle_shutdown(&req)? {
+                                return Ok(true);
+                            }
+                            self.on_request(req);
+                        }
+                        Message::Notification(n) if n.method == notif::Exit::METHOD => {
+                            return Ok(false);
+                        }
+                        Message::Notification(n) => self.on_notification(n),
+                        Message::Response(_) => {}
                     }
-                    self.on_request(req);
                 }
-                Message::Notification(n) if n.method == notif::Exit::METHOD => return Ok(false),
-                Message::Notification(n) => self.on_notification(n),
-                Message::Response(_) => {}
+                recv(events) -> ev => {
+                    if let Ok(ev) = ev {
+                        self.on_event(ev);
+                    }
+                }
             }
         }
-        Ok(false)
+    }
+
+    fn on_event(&mut self, ev: Event) {
+        match ev {
+            Event::Indexed(generation, files) => {
+                if generation != self.scan_generation {
+                    return;
+                }
+                let n = files.len();
+                for f in files {
+                    if !self.docs.contains_key(&f.uri) {
+                        self.index.insert(f);
+                    }
+                }
+                log::info!("indexed {n} files");
+            }
+        }
+    }
+
+    fn start_scan(&mut self) {
+        self.scan_generation += 1;
+        if !self.settings.config.workspace.index || self.roots.is_empty() {
+            return;
+        }
+        let settings = self.settings.clone();
+        let roots = self.roots.clone();
+        let sender = self.events.0.clone();
+        let generation = self.scan_generation;
+        std::thread::spawn(move || {
+            let files = workspace::scan(&settings, &roots);
+            let _ = sender.send(Event::Indexed(generation, files));
+        });
+    }
+
+    fn register_watchers(&mut self) {
+        if !self.watch_files || !self.settings.config.workspace.index {
+            return;
+        }
+        let exts: Vec<&str> = self
+            .settings
+            .dialects
+            .iter()
+            .flat_map(|d| d.extensions.iter().map(String::as_str))
+            .collect();
+        let options = DidChangeWatchedFilesRegistrationOptions {
+            watchers: vec![FileSystemWatcher {
+                glob_pattern: GlobPattern::String(format!("**/*.{{{}}}", exts.join(","))),
+                kind: None,
+            }],
+        };
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: "llsp-watch".into(),
+                method: notif::DidChangeWatchedFiles::METHOD.into(),
+                register_options: serde_json::to_value(options).ok(),
+            }],
+        };
+        self.next_request += 1;
+        let id = RequestId::from(format!("llsp-{}", self.next_request));
+        self.send(Request::new(id, req::RegisterCapability::METHOD.into(), params).into());
     }
 
     fn on_request(&mut self, req: Request) {
@@ -161,6 +259,9 @@ impl Server {
             }
             notif::DidChangeConfiguration::METHOD => {
                 self.notify::<notif::DidChangeConfiguration>(n, Self::did_change_configuration)
+            }
+            notif::DidChangeWatchedFiles::METHOD => {
+                self.notify::<notif::DidChangeWatchedFiles>(n, Self::did_change_watched_files)
             }
             _ => Ok(()),
         };
@@ -199,38 +300,73 @@ impl Server {
 
     fn did_open(&mut self, p: lsp_types::DidOpenTextDocumentParams) {
         let doc = p.text_document;
-        let path = uri_to_path(&doc.uri);
+        let uri = normalize_uri(&doc.uri);
+        let path = uri_to_path(&uri);
         let dialect = self
             .settings
             .detect(path.as_deref(), Some(&doc.language_id), &doc.text);
-        let document = Document::new(doc.text, doc.version, dialect);
-        self.docs.insert(doc.uri.clone(), document);
-        self.publish_diagnostics(&doc.uri);
+        let mut document = Document::new(doc.text, doc.version, dialect);
+        document.client_uri = doc.uri;
+        self.docs.insert(uri.clone(), document);
+        self.document_changed(&uri);
     }
 
     fn did_change(&mut self, p: lsp_types::DidChangeTextDocumentParams) {
-        let uri = p.text_document.uri;
+        let uri = normalize_uri(&p.text_document.uri);
         let Some(doc) = self.docs.get_mut(&uri) else {
             log::warn!("change for unopened document {}", uri.as_str());
             return;
         };
         doc.apply_changes(p.content_changes, p.text_document.version, self.enc);
-        self.publish_diagnostics(&uri);
+        self.document_changed(&uri);
     }
 
     fn did_close(&mut self, p: lsp_types::DidCloseTextDocumentParams) {
-        let uri = p.text_document.uri;
+        let uri = normalize_uri(&p.text_document.uri);
         self.docs.remove(&uri);
+        self.index.remove(&uri);
+        if let Some(path) = uri_to_path(&uri)
+            && workspace::is_inside(&self.roots, &path)
+            && let Some(summary) = workspace::summarize(&self.settings, &path)
+        {
+            self.index.insert(summary);
+        }
         self.send_notification::<notif::PublishDiagnostics>(PublishDiagnosticsParams {
-            uri,
+            uri: p.text_document.uri,
             diagnostics: Vec::new(),
             version: None,
         });
     }
 
+    fn did_change_watched_files(&mut self, p: lsp_types::DidChangeWatchedFilesParams) {
+        for change in p.changes {
+            let uri = normalize_uri(&change.uri);
+            if self.docs.contains_key(&uri) {
+                continue;
+            }
+            let Some(path) = uri_to_path(&uri) else {
+                continue;
+            };
+            if change.typ == FileChangeType::DELETED {
+                self.index.remove(&uri);
+                continue;
+            }
+            if !workspace::is_inside(&self.roots, &path) {
+                log::debug!("ignoring watched file outside roots: {}", path.display());
+                continue;
+            }
+            match workspace::summarize(&self.settings, &path) {
+                Some(s) => self.index.insert(s),
+                None => self.index.remove(&uri),
+            }
+        }
+    }
+
     fn did_change_configuration(&mut self, p: lsp_types::DidChangeConfigurationParams) {
         let settings = match p.settings {
-            serde_json::Value::Object(mut o) if o.contains_key("llsp") => o.remove("llsp").unwrap(),
+            serde_json::Value::Object(mut o) if o.contains_key("llsp") => {
+                o.remove("llsp").unwrap_or_default()
+            }
             other => other,
         };
         let mut layers = self.layers.clone();
@@ -243,6 +379,9 @@ impl Server {
                 self.layers = layers;
                 self.settings = settings;
                 self.reload_documents();
+                self.index = Index::default();
+                self.reindex_open_documents();
+                self.start_scan();
             }
             Err(e) => self.show_warning(format!("llsp: configuration ignored: {e:#}")),
         }
@@ -254,10 +393,35 @@ impl Server {
             let doc = &self.docs[&uri];
             let path = uri_to_path(&uri);
             let dialect = self.settings.detect(path.as_deref(), None, doc.text());
-            let doc = Document::new(doc.text().to_owned(), doc.version, dialect);
-            self.docs.insert(uri.clone(), doc);
+            let mut fresh = Document::new(doc.text().to_owned(), doc.version, dialect);
+            fresh.client_uri = doc.client_uri.clone();
+            self.docs.insert(uri.clone(), fresh);
             self.publish_diagnostics(&uri);
         }
+    }
+
+    fn reindex_open_documents(&mut self) {
+        for (uri, doc) in &self.docs {
+            self.index.insert(FileSummary::new(
+                uri.clone(),
+                doc.dialect.clone(),
+                doc.tree(),
+                doc.analysis(),
+            ));
+        }
+    }
+
+    fn document_changed(&mut self, uri: &Uri) {
+        let Some(doc) = self.docs.get(uri) else {
+            return;
+        };
+        self.index.insert(FileSummary::new(
+            uri.clone(),
+            doc.dialect.clone(),
+            doc.tree(),
+            doc.analysis(),
+        ));
+        self.publish_diagnostics(uri);
     }
 
     fn publish_diagnostics(&self, uri: &Uri) {
@@ -281,9 +445,134 @@ impl Server {
             })
             .collect();
         self.send_notification::<notif::PublishDiagnostics>(PublishDiagnosticsParams {
-            uri: uri.clone(),
+            uri: doc.client_uri.clone(),
             diagnostics,
             version: Some(doc.version),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::path_to_uri;
+
+    fn server(root: &std::path::Path) -> (Server, Connection) {
+        let (conn, client) = Connection::memory();
+        let settings = Layers::default().resolve().unwrap();
+        let s = Server {
+            conn,
+            layers: Layers::default(),
+            settings,
+            enc: Encoding::Utf16,
+            roots: vec![root.canonicalize().unwrap()],
+            docs: FxHashMap::default(),
+            index: Index::default(),
+            events: crossbeam_channel::unbounded(),
+            scan_generation: 0,
+            watch_files: false,
+            next_request: 0,
+        };
+        (s, client)
+    }
+
+    fn scan_now(s: &mut Server) {
+        s.start_scan();
+        let ev = s.events.1.recv().unwrap();
+        s.on_event(ev);
+    }
+
+    fn open(s: &mut Server, uri: &Uri, text: &str) {
+        s.did_open(lsp_types::DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "lisp".into(),
+                version: 1,
+                text: text.into(),
+            },
+        });
+    }
+
+    fn def_names(s: &Server, uri: &Uri) -> Vec<String> {
+        s.index
+            .get(uri)
+            .unwrap()
+            .defs
+            .iter()
+            .map(|d| d.name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn open_document_overrides_disk_and_close_restores() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap().join("a.lisp");
+        std::fs::write(&path, "(defun old ())").unwrap();
+        let (mut s, _client) = server(dir.path());
+        scan_now(&mut s);
+        let uri = path_to_uri(&path).unwrap();
+        assert_eq!(def_names(&s, &uri), ["old"]);
+
+        open(&mut s, &uri, "(defun old ()) (defun fresh ())");
+        assert_eq!(def_names(&s, &uri), ["old", "fresh"]);
+
+        s.did_close(lsp_types::DidCloseTextDocumentParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+        });
+        assert_eq!(def_names(&s, &uri), ["old"]);
+    }
+
+    #[test]
+    fn scan_results_do_not_clobber_open_documents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap().join("a.lisp");
+        std::fs::write(&path, "(defun disk ())").unwrap();
+        let (mut s, _client) = server(dir.path());
+        let uri = path_to_uri(&path).unwrap();
+        open(&mut s, &uri, "(defun live ())");
+        scan_now(&mut s);
+        assert_eq!(def_names(&s, &uri), ["live"]);
+    }
+
+    #[test]
+    fn watched_file_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let (mut s, _client) = server(&root);
+        let path = root.join("new.scm");
+        std::fs::write(&path, "(define (f) 1)").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let out_path = outside.path().canonicalize().unwrap().join("x.scm");
+        std::fs::write(&out_path, "(define (secret) 1)").unwrap();
+        let event = |uri: Uri, typ| lsp_types::FileEvent { uri, typ };
+        let uri = path_to_uri(&path).unwrap();
+        let out_uri = path_to_uri(&out_path).unwrap();
+        s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {
+            changes: vec![
+                event(uri.clone(), FileChangeType::CREATED),
+                event(out_uri.clone(), FileChangeType::CREATED),
+            ],
+        });
+        assert_eq!(def_names(&s, &uri), ["f"]);
+        assert!(s.index.get(&out_uri).is_none());
+        s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {
+            changes: vec![event(uri.clone(), FileChangeType::DELETED)],
+        });
+        assert!(s.index.is_empty());
+    }
+
+    #[test]
+    fn indexing_can_be_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.lisp"), "(defun a ())").unwrap();
+        let (mut s, _client) = server(dir.path());
+        s.settings = Layers {
+            cli: toml::from_str("[workspace]\nindex = false").unwrap(),
+            ..Layers::default()
+        }
+        .resolve()
+        .unwrap();
+        s.start_scan();
+        assert!(s.events.1.try_recv().is_err());
     }
 }

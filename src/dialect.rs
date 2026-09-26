@@ -155,6 +155,8 @@ pub enum Params {
 pub enum ParamSearch {
     /// First vector after the name, or arity lists `([x] body)`.
     Vector,
+    /// First parenthesized list after the name.
+    List,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -174,6 +176,10 @@ pub enum BindingShape {
     Single,
     /// `(flet ((name (params) body)) body)`
     Flet,
+    /// `(case-lambda ((params) body) ...)`
+    Clauses,
+    /// `(each [k v (pairs t)] body)`: all but the last element bind.
+    Iterator,
 }
 
 fn yes() -> bool {

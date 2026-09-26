@@ -85,7 +85,7 @@ parameterize = "let"
 do = "let"
 lambda = "lambda"
 "λ" = "lambda"
-case-lambda = "flet"
+case-lambda = "clauses"
 receive = "bind"
 
 [indent]

@@ -6,6 +6,7 @@ use line_index::{LineIndex, TextSize, WideEncoding, WideLineCol};
 use lsp_types::{Position, Range, TextDocumentContentChangeEvent, Uri};
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 
+use crate::analysis::Analysis;
 use crate::config::Settings;
 use crate::dialect::Dialect;
 use crate::syntax::Tree;
@@ -19,20 +20,26 @@ pub enum Encoding {
 #[derive(Debug, Clone)]
 pub struct Document {
     pub version: i32,
+    /// URI as the client spelled it, for messages sent back.
+    pub client_uri: Uri,
     pub dialect: Arc<Dialect>,
     tree: Tree,
     lines: LineIndex,
+    analysis: Analysis,
 }
 
 impl Document {
     pub fn new(text: String, version: i32, dialect: Arc<Dialect>) -> Self {
         let lines = LineIndex::new(&text);
         let tree = Tree::parse(text, &dialect);
+        let analysis = Analysis::new(&tree, &dialect);
         Self {
             version,
+            client_uri: Uri::from_str("untitled:llsp").expect("valid URI"),
             dialect,
             tree,
             lines,
+            analysis,
         }
     }
 
@@ -69,6 +76,11 @@ impl Document {
         }
         self.version = version;
         self.tree = Tree::parse(text, &self.dialect);
+        self.analysis = Analysis::new(&self.tree, &self.dialect);
+    }
+
+    pub fn analysis(&self) -> &Analysis {
+        &self.analysis
     }
 
     pub fn offset(&self, pos: Position, enc: Encoding) -> u32 {
@@ -154,6 +166,13 @@ pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     } else {
         &decoded[..]
     }))
+}
+
+/// Canonical form of a `file:` URI so editor and walker spellings compare equal.
+pub fn normalize_uri(uri: &Uri) -> Uri {
+    uri_to_path(uri)
+        .and_then(|p| path_to_uri(&p))
+        .unwrap_or_else(|| uri.clone())
 }
 
 pub fn path_to_uri(path: &Path) -> Option<Uri> {
