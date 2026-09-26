@@ -10,6 +10,15 @@ Fast, static language server for Lisp dialects, written in Rust.
 - **Configurable:** every setting can come from a file, an environment variable, the command
   line or the editor.
 
+## Features
+
+- Syntax diagnostics: unbalanced, mismatched or unexpected delimiters, unterminated strings
+  and comments
+- Document outline and fuzzy workspace symbol search
+- Go to definition, find references, document highlights, for locals (with shadowing) and
+  workspace names (namespaces and aliases taken into account)
+- Rename, both local and across the workspace, with validation of the new name
+
 ## Install
 
 ```sh
@@ -76,6 +85,7 @@ max_file_size = 8388608           # larger files are not analyzed
 index = true
 exclude = ["**/node_modules/**", "**/target/**"]
 max_files = 20000
+max_symbols = 256                 # workspace/symbol result cap
 
 [format]
 body_indent = 2

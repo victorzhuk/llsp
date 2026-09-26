@@ -7,10 +7,10 @@ use lsp_types::notification::{self as notif, Notification as _};
 use lsp_types::request::{self as req, Request as _};
 use lsp_types::{
     DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher, GlobPattern,
-    InitializeParams, InitializeResult, MessageType, PositionEncodingKind,
-    PublishDiagnosticsParams, Registration, RegistrationParams, ServerCapabilities, ServerInfo,
-    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Uri,
+    InitializeParams, InitializeResult, MessageType, OneOf, PositionEncodingKind,
+    PublishDiagnosticsParams, Registration, RegistrationParams, RenameOptions, ServerCapabilities,
+    ServerInfo, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
 };
 use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
@@ -37,6 +37,29 @@ pub struct Server {
 enum Event {
     Indexed(u64, Vec<FileSummary>),
 }
+
+pub(crate) struct ResponseError {
+    code: i32,
+    message: String,
+}
+
+impl ResponseError {
+    pub(crate) fn invalid_params(message: impl Into<String>) -> Self {
+        Self {
+            code: ErrorCode::InvalidParams as i32,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn request_failed(message: impl Into<String>) -> Self {
+        Self {
+            code: ErrorCode::RequestFailed as i32,
+            message: message.into(),
+        }
+    }
+}
+
+pub(crate) type HandlerResult<T> = std::result::Result<T, ResponseError>;
 
 /// Runs the protocol until `exit`. Returns whether `shutdown` was received first.
 pub fn run(conn: Connection, mut layers: Layers) -> Result<bool> {
@@ -142,6 +165,15 @@ fn capabilities(enc: Encoding) -> ServerCapabilities {
                 ..Default::default()
             },
         )),
+        document_symbol_provider: Some(OneOf::Left(true)),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
+        definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
         ..Default::default()
     }
 }
@@ -237,12 +269,54 @@ impl Server {
     }
 
     fn on_request(&mut self, req: Request) {
-        let resp = Response::new_err(
-            req.id,
-            ErrorCode::MethodNotFound as i32,
-            format!("unknown method {}", req.method),
-        );
+        let Request { id, method, params } = req;
+        let resp = match method.as_str() {
+            req::DocumentSymbolRequest::METHOD => {
+                self.handle::<req::DocumentSymbolRequest>(id, params, Self::document_symbols)
+            }
+            req::WorkspaceSymbolRequest::METHOD => {
+                self.handle::<req::WorkspaceSymbolRequest>(id, params, Self::workspace_symbols)
+            }
+            req::GotoDefinition::METHOD => {
+                self.handle::<req::GotoDefinition>(id, params, Self::definition)
+            }
+            req::References::METHOD => self.handle::<req::References>(id, params, Self::references),
+            req::DocumentHighlightRequest::METHOD => {
+                self.handle::<req::DocumentHighlightRequest>(id, params, Self::document_highlight)
+            }
+            req::PrepareRenameRequest::METHOD => {
+                self.handle::<req::PrepareRenameRequest>(id, params, Self::prepare_rename)
+            }
+            req::Rename::METHOD => self.handle::<req::Rename>(id, params, Self::rename),
+            _ => Response::new_err(
+                id,
+                ErrorCode::MethodNotFound as i32,
+                format!("unknown method {method}"),
+            ),
+        };
         self.send(resp.into());
+    }
+
+    fn handle<R>(
+        &mut self,
+        id: RequestId,
+        params: serde_json::Value,
+        f: impl FnOnce(&mut Self, R::Params) -> HandlerResult<R::Result>,
+    ) -> Response
+    where
+        R: req::Request,
+        R::Params: DeserializeOwned,
+    {
+        let params = match serde_json::from_value::<R::Params>(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return Response::new_err(id, ErrorCode::InvalidParams as i32, e.to_string());
+            }
+        };
+        match f(self, params) {
+            Ok(result) => Response::new_ok(id, result),
+            Err(e) => Response::new_err(id, e.code, e.message),
+        }
     }
 
     fn on_notification(&mut self, n: Notification) {
