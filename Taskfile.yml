@@ -1,0 +1,44 @@
+version: "3"
+
+vars:
+  TEST_THREADS: '{{.TEST_THREADS | default "4"}}'
+
+tasks:
+  build:
+    desc: Build release binary
+    cmds:
+      - cargo build --release --locked
+
+  test:
+    desc: Run all tests with a wall-clock timeout and a thread cap
+    cmds:
+      - timeout 5m cargo test --locked --all-targets -- --test-threads={{.TEST_THREADS}}
+
+  lint:
+    desc: Check formatting and clippy
+    cmds:
+      - cargo fmt --all --check
+      - cargo clippy --locked --all-targets -- -D warnings
+
+  bench:
+    desc: Run criterion benchmarks
+    cmds:
+      - timeout 30m cargo bench --locked {{.CLI_ARGS}}
+
+  deny:
+    desc: Audit dependencies (advisories, licenses, sources)
+    cmds:
+      - cargo deny check
+
+  spec:
+    desc: Validate OpenSpec specs and changes
+    cmds:
+      - openspec validate --all --strict
+
+  ci:
+    desc: Everything CI runs
+    cmds:
+      - task: lint
+      - task: test
+      - timeout 10m cargo bench --locked --no-run
+      - task: spec
