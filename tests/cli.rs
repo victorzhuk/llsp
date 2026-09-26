@@ -220,3 +220,32 @@ fn check_runs_lints_across_files() {
         [("unresolved-call", "warning"), ("unused-binding", "hint")]
     );
 }
+
+#[test]
+fn format_check_and_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.lisp");
+    std::fs::write(&file, "(defun f ()\n(g))\n").unwrap();
+    std::fs::write(dir.path().join("ok.lisp"), "(defun f ()\n  (g))\n").unwrap();
+    let out = llsp(dir.path(), &["format", "--check", ".", "--format", "text"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .ends_with("a.lisp")
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "(defun f ()\n(g))\n"
+    );
+
+    let out = llsp(dir.path(), &["format", "."]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "(defun f ()\n  (g))\n"
+    );
+    let out = llsp(dir.path(), &["format", "--check", "."]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(json(&out), serde_json::json!([]));
+}

@@ -147,7 +147,6 @@ destructuring-bind = 2
 multiple-value-bind = 2
 when = 1
 unless = 1
-if = 2
 block = 1
 catch = 1
 case = 1
@@ -171,6 +170,8 @@ tagbody = 0
 eval-when = 1
 return-from = 1
 print-unreadable-object = 1
+with-slots = 2
+with-accessors = 2
 
 [indent_prefixes]
 "def" = 2

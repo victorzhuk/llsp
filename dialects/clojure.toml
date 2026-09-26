@@ -108,6 +108,8 @@ letfn = "flet"
 
 [indent]
 ns = 1
+if = 1
+if-not = 1
 fn = 1
 let = 1
 "let*" = 1

@@ -30,6 +30,7 @@ Fast, static language server for Lisp dialects, written in Rust.
 - Semantic highlighting: definitions, parameters, locals, macros, special forms, builtins,
   keywords, namespaces, regexes, and datum comments shown as comments
 - Folding ranges and expand selection
+- Formatting (document and range) that only re-indents; see [Formatting](#formatting)
 
 ## Install
 
@@ -60,11 +61,12 @@ llsp [--config PATH] [--set KEY=VALUE]... [--log-level LEVEL] [--log-file PATH] 
 
   serve      serve LSP (default)
   check      report diagnostics for files or directories; exit 1 on errors, 2 on I/O errors
+  format     re-indent files in place; --check lists files that would change and exits 1
   config     print the effective configuration
   dialects   list dialects and their file extensions
 ```
 
-`check`, `config` and `dialects` accept `--format text|json`. When `--format` isn't given, the
+`check`, `format`, `config` and `dialects` accept `--format text|json`. When `--format` isn't given, the
 output is text on a terminal and JSON otherwise, so both scripts and CI can parse it.
 
 ## Configuration
@@ -130,6 +132,27 @@ defroute = { kind = "function", params = "vector" }
 extends = "common-lisp"
 extensions = ["lfe"]
 case_sensitive = true
+```
+
+### Formatting
+
+The formatter only changes indentation. It re-indents lines and trims trailing whitespace,
+and never moves code between lines. Lines that start inside a string or block comment are
+left alone. Each line is indented according to the innermost list that encloses it:
+
+- **`[...]` and `{...}`:** one column past the opener.
+- **Head with an indent spec N:** the first N arguments get `distinguished_indent`; the rest
+  get `body_indent`. The spec comes from, in order:
+  - an indent declared in code: `(declare (indent N))`, or `:style/indent N` in Clojure
+  - the dialect's `indent` table
+  - the longest matching `indent_prefixes` entry
+- **Any other call:**
+  - if the first argument is on the same line as the head, later arguments align with it
+  - otherwise they go one column past the opener
+
+```toml
+[dialects.common-lisp.indent]
+my-with-macro = 1
 ```
 
 ### Dialect detection
