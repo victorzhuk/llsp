@@ -1,0 +1,50 @@
+[package]
+name = "llsp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Fast, static language server for Lisp dialects"
+license = "Apache-2.0"
+repository = "https://github.com/victorzhuk/llsp"
+readme = "README.md"
+keywords = ["lsp", "lisp", "clojure", "scheme", "language-server"]
+categories = ["development-tools"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.6", features = ["derive", "env"] }
+crossbeam-channel = "0.5"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+etcetera = "0.11"
+globset = "0.4"
+ignore = "0.4"
+line-index = "0.1"
+log = "0.4"
+lsp-server = "0.10"
+lsp-types = "0.97"
+percent-encoding = "2"
+rayon = "1"
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+
+[dev-dependencies]
+criterion = "0.8"
+insta = "1"
+proptest = "1"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.bench]
+debug = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

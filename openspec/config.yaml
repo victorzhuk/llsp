@@ -1,0 +1,17 @@
+schema: spec-driven
+
+context: |
+  llsp: static, multi-dialect Lisp language server in Rust.
+  Dialects: Common Lisp, Clojure (clj/cljs/cljc/edn), Scheme (R7RS/Guile/Chicken),
+  Racket, Emacs Lisp, Fennel, Janet.
+  Stack: lsp-server + lsp-types (sync main loop), own lossless reader, rowan CST,
+  line-index, serde + toml + clap config layering, criterion benches, insta/proptest tests.
+  Principles: no code evaluation, no subprocesses, no network; every tunable
+  comes from config, env, CLI or LSP settings; smallest correct change.
+  Commits: Conventional Commits.
+
+rules:
+  proposal:
+    - Keep proposals under one page
+  tasks:
+    - Each task names its verification (test, command, or observable behavior)
