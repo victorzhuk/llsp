@@ -21,7 +21,7 @@ fn json(out: &Output) -> serde_json::Value {
 #[test]
 fn check_reports_errors_as_json_when_piped() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("broken.lisp"), "(defun f (x)\n").unwrap();
+    std::fs::write(dir.path().join("broken.lisp"), "(defun f (x) x\n").unwrap();
     std::fs::write(dir.path().join("ok.clj"), "(ns a) {:a [1]}").unwrap();
     let out = llsp(dir.path(), &["check", "."]);
     assert_eq!(out.status.code(), Some(1));
@@ -187,4 +187,36 @@ fn stdio_serve_roundtrip() {
     );
     send(&mut stdin, r#"{"jsonrpc":"2.0","method":"exit"}"#);
     assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn check_runs_lints_across_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.lisp"), "(defun helper () 1)").unwrap();
+    std::fs::write(
+        dir.path().join("b.lisp"),
+        "(helper) (nowhere) (let ((u 1)) 2)",
+    )
+    .unwrap();
+    let out = llsp(
+        dir.path(),
+        &[
+            "check",
+            ".",
+            "--set",
+            "diagnostics.unresolved_call=\"warning\"",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0), "warnings and hints only");
+    let v = json(&out);
+    let codes: Vec<_> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["code"].as_str().unwrap(), r["severity"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        codes,
+        [("unresolved-call", "warning"), ("unused-binding", "hint")]
+    );
 }

@@ -46,6 +46,8 @@ pub struct Dialect {
     #[serde(default)]
     pub pattern_ignore: Vec<String>,
     #[serde(default)]
+    pub data_forms: Vec<String>,
+    #[serde(default)]
     pub indent: HashMap<String, u32>,
     #[serde(default)]
     pub indent_prefixes: HashMap<String, u32>,
@@ -65,6 +67,7 @@ struct Lookup {
     bindings: FxHashMap<String, BindingShape>,
     namespace_forms: FxHashSet<String>,
     pattern_ignore: FxHashSet<String>,
+    data_forms: FxHashSet<String>,
     indent: FxHashMap<String, u32>,
     special_forms: FxHashSet<String>,
     builtins: FxHashSet<String>,
@@ -115,7 +118,7 @@ pub(crate) const CLOSE: u8 = 2;
 pub(crate) const STOP: u8 = 4;
 pub(crate) const SPECIAL: u8 = 8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SymbolKind {
     Function,
@@ -254,6 +257,7 @@ impl Dialect {
             bindings: self.bindings.iter().map(|(k, v)| (key(k), *v)).collect(),
             namespace_forms: set(&self.namespace_forms),
             pattern_ignore: set(&self.pattern_ignore),
+            data_forms: set(&self.data_forms),
             indent: self.indent.iter().map(|(k, v)| (key(k), *v)).collect(),
             special_forms: set(&self.special_forms),
             builtins: set(&self.builtins),
@@ -284,6 +288,10 @@ impl Dialect {
 
     pub fn is_pattern_ignored(&self, name: &str) -> bool {
         self.lookup.pattern_ignore.contains(name)
+    }
+
+    pub fn is_data_form(&self, head: &str) -> bool {
+        self.lookup.data_forms.contains(head)
     }
 
     pub fn is_special_form(&self, name: &str) -> bool {

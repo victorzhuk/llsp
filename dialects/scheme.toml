@@ -7,6 +7,7 @@ keyword_prefixes = ["#:"]
 namespace_forms = []
 def_prefixes = ["define-"]
 pattern_ignore = [".", "..."]
+data_forms = ["quote", "quasiquote", "case", "cond", "define-record-type", "syntax-rules", "syntax-case", "import", "export", "define-library", "define-module", "use-modules", "guard"]
 constants = ["#t", "#f", "#true", "#false"]
 special_forms = [
   "define", "define-syntax", "define-record-type", "define-values", "define-library",

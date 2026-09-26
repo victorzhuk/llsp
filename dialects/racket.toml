@@ -4,6 +4,7 @@ language_ids = ["racket"]
 modeline_names = ["racket"]
 keyword_prefixes = ["#:"]
 def_prefixes = ["define-"]
+data_forms = ["quote", "quasiquote", "case", "cond", "define-record-type", "syntax-rules", "syntax-case", "syntax-parse", "require", "provide", "struct", "match", "match-define", "match-let", "match-lambda", "with-handlers", "module", "module+"]
 special_forms = [
   "define", "define-values", "define-syntax", "define-syntax-rule", "define-struct",
   "struct", "lambda", "λ", "case-lambda", "let", "let*", "letrec", "let-values",

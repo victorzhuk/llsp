@@ -16,6 +16,7 @@ pub struct Config {
     pub files: Files,
     pub workspace: Workspace,
     pub completion: Completion,
+    pub diagnostics: Diagnostics,
     pub format: Format,
     pub log: Log,
     pub dialects: toml::Table,
@@ -78,6 +79,42 @@ impl Default for Completion {
         Self {
             max_items: 200,
             builtins: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Level {
+    Off,
+    Hint,
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Diagnostics {
+    pub enable: bool,
+    pub debounce_ms: u64,
+    pub unused_binding: Level,
+    pub duplicate_definition: Level,
+    pub unresolved_call: Level,
+    pub ignore_prefix: String,
+    pub known_symbols: Vec<String>,
+}
+
+impl Default for Diagnostics {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            debounce_ms: 100,
+            unused_binding: Level::Hint,
+            duplicate_definition: Level::Warning,
+            unresolved_call: Level::Off,
+            ignore_prefix: "_".into(),
+            known_symbols: Vec::new(),
         }
     }
 }
@@ -352,6 +389,15 @@ mod tests {
     fn unknown_key_is_named() {
         let err = Settings::from_table(table("[fromat]\nx = 1")).unwrap_err();
         assert!(format!("{err:#}").contains("fromat"), "{err:#}");
+    }
+
+    #[test]
+    fn invalid_severity_is_named() {
+        let err =
+            Settings::from_table(table("[diagnostics]\nunused_binding = \"loud\"")).unwrap_err();
+        assert!(format!("{err:#}").contains("unused_binding"), "{err:#}");
+        let s = Settings::from_table(table("[diagnostics]\nunresolved_call = \"error\"")).unwrap();
+        assert_eq!(s.config.diagnostics.unresolved_call, Level::Error);
     }
 
     #[test]

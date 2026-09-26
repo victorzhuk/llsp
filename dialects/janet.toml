@@ -7,6 +7,7 @@ keyword_prefixes = [":"]
 namespace_forms = []
 def_prefixes = ["def"]
 pattern_ignore = ["&", "&opt", "&keys", "&named", "_"]
+data_forms = ["quote", "quasiquote", "case", "match", "cond", "import", "use"]
 constants = ["nil", "true", "false"]
 special_forms = [
   "def", "var", "fn", "do", "quote", "if", "splice", "while", "break", "set", "quasiquote",

@@ -12,8 +12,12 @@ Fast, static language server for Lisp dialects, written in Rust.
 
 ## Features
 
-- Syntax diagnostics: unbalanced, mismatched or unexpected delimiters, unterminated strings
-  and comments
+- Diagnostics:
+  - syntax errors: unbalanced, mismatched or unexpected delimiters, unterminated strings and
+    comments
+  - lints, each with its own severity: `unused-binding`, `duplicate-definition`, and
+    `unresolved-call` (off by default)
+  - the same diagnostics are available from `llsp check`
 - Document outline and fuzzy workspace symbol search
 - Go to definition, find references, document highlights, for locals (with shadowing) and
   workspace names (namespaces and aliases taken into account)
@@ -95,6 +99,15 @@ max_symbols = 256                 # workspace/symbol result cap
 [completion]
 max_items = 200
 builtins = true                   # offer dialect special forms and builtins
+
+[diagnostics]
+enable = true
+debounce_ms = 100
+unused_binding = "hint"           # off | hint | info | warning | error
+duplicate_definition = "warning"
+unresolved_call = "off"           # calls to names defined nowhere in the workspace
+ignore_prefix = "_"               # bindings starting with this are never "unused"
+known_symbols = []                # extra names unresolved-call accepts
 
 [format]
 body_indent = 2

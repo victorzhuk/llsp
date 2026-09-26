@@ -57,6 +57,7 @@ keyword_prefixes = [":"]
 namespace_forms = ["in-package"]
 def_prefixes = ["def", "define-"]
 pattern_ignore = ["&optional", "&rest", "&key", "&aux", "&body", "&whole", "&environment", "&allow-other-keys", "."]
+data_forms = ["quote", "declare", "declaim", "proclaim", "defpackage", "defclass", "define-condition", "defstruct", "deftype", "case", "ecase", "ccase", "typecase", "etypecase", "ctypecase", "cond", "handler-case", "handler-bind", "restart-case", "restart-bind", "loop", "eval-when", "defgeneric"]
 constants = ["nil", "t"]
 
 [reader]
