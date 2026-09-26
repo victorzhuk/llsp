@@ -27,6 +27,9 @@ Fast, static language server for Lisp dialects, written in Rust.
 - Signature help that picks the matching arity and understands lambda-list markers
   (`&optional`, `&rest`, `&`)
 - Hover with signature, kind, namespace, docstring and location
+- Semantic highlighting: definitions, parameters, locals, macros, special forms, builtins,
+  keywords, namespaces, regexes, and datum comments shown as comments
+- Folding ranges and expand selection
 
 ## Install
 
