@@ -84,10 +84,8 @@ impl Server {
                     }
                 }
                 for f in self.index.files().filter(|f| same(f)) {
-                    for d in &f.defs {
-                        if let Some(score) = fuzzy_score(&query, &d.name) {
-                            push(def_candidate(d, score));
-                        }
+                    for (score, d) in f.search(&query) {
+                        push(def_candidate(d, score));
                     }
                 }
                 if cfg.builtins {

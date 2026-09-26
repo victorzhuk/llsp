@@ -57,8 +57,7 @@ impl Server {
         let mut hits: Vec<_> = self
             .index
             .files()
-            .flat_map(|f| f.defs.iter().map(move |d| (f, d)))
-            .filter_map(|(f, d)| Some((fuzzy_score(&query, &d.name)?, f, d)))
+            .flat_map(|f| f.search(&query).map(move |(score, d)| (score, f, d)))
             .collect();
         hits.sort_by(|a, b| {
             (a.0, a.2.name.len(), &a.2.name, a.1.uri.as_str()).cmp(&(
@@ -87,21 +86,42 @@ impl Server {
 /// Lower is better: 0 exact, 1 prefix, 2 substring, 3 subsequence; `None` for no match.
 /// `query` must already be lowercase.
 pub(crate) fn fuzzy_score(query: &str, name: &str) -> Option<u8> {
-    if query.is_empty() {
-        return Some(3);
+    if name.bytes().any(|b| b.is_ascii_uppercase()) || !name.is_ascii() {
+        return score_lowercase(query, &name.to_lowercase());
     }
-    let name = name.to_lowercase();
-    if name == query {
-        return Some(0);
+    score_lowercase(query, name)
+}
+
+/// Same as [`fuzzy_score`] for a name that is already lowercase.
+pub(crate) fn score_lowercase(query: &str, name: &str) -> Option<u8> {
+    if !is_subsequence(query, name) {
+        return None;
     }
-    if name.starts_with(query) {
-        return Some(1);
+    Some(if query.is_empty() {
+        3
+    } else if name == query {
+        0
+    } else if name.starts_with(query) {
+        1
+    } else if name.contains(query) {
+        2
+    } else {
+        3
+    })
+}
+
+fn is_subsequence(query: &str, name: &str) -> bool {
+    let mut want = query.as_bytes().iter().peekable();
+    for b in name.bytes() {
+        match want.peek() {
+            Some(&&q) if q == b => {
+                want.next();
+            }
+            Some(_) => {}
+            None => break,
+        }
     }
-    if name.contains(query) {
-        return Some(2);
-    }
-    let mut chars = name.chars();
-    query.chars().all(|q| chars.any(|c| c == q)).then_some(3)
+    want.peek().is_none()
 }
 
 #[cfg(test)]
@@ -116,5 +136,7 @@ mod tests {
         assert_eq!(fuzzy_score("mkp", "make-point"), Some(3));
         assert_eq!(fuzzy_score("mkp", "mapcar-safe"), None);
         assert_eq!(fuzzy_score("", "x"), Some(3));
+        assert_eq!(fuzzy_score("ö", "Öl"), Some(1));
+        assert_eq!(fuzzy_score("öx", "Ölx"), Some(3));
     }
 }

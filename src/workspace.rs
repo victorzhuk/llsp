@@ -23,6 +23,8 @@ pub struct FileSummary {
     /// Global (non-local) occurrences by normalized name, including definition names.
     pub refs: FxHashMap<String, Vec<(u32, u32)>>,
     def_keys: FxHashMap<String, Vec<u32>>,
+    /// Lowercased definition names, one per line, scanned sequentially by fuzzy search.
+    search_names: String,
 }
 
 impl FileSummary {
@@ -39,7 +41,14 @@ impl FileSummary {
         for (i, d) in analysis.defs.iter().enumerate() {
             def_keys.entry(d.key.clone()).or_default().push(i as u32);
         }
+        let search_names = analysis
+            .defs
+            .iter()
+            .map(|d| d.name.to_lowercase().replace('\n', " "))
+            .collect::<Vec<_>>()
+            .join("\n");
         Self {
+            search_names,
             uri,
             dialect,
             defs: analysis.defs.clone(),
@@ -54,6 +63,16 @@ impl FileSummary {
         let tree = Tree::parse(text, &dialect);
         let analysis = Analysis::new(&tree, &dialect);
         Self::new(uri, dialect, &tree, &analysis)
+    }
+
+    /// Definitions whose names fuzzy-match a lowercase `query`, with their scores.
+    pub fn search<'a>(&'a self, query: &'a str) -> impl Iterator<Item = (u8, &'a Def)> + 'a {
+        let names = (!self.defs.is_empty()).then_some(self.search_names.split('\n'));
+        names
+            .into_iter()
+            .flatten()
+            .zip(&self.defs)
+            .filter_map(move |(name, d)| Some((crate::features::score_lowercase(query, name)?, d)))
     }
 
     pub fn defs_named<'a>(&'a self, key: &str) -> impl Iterator<Item = &'a Def> + 'a {
