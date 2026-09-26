@@ -2,6 +2,120 @@
 
 Fast, static language server for Lisp dialects, written in Rust.
 
+- **Dialects:** Common Lisp, Clojure (clj/cljs/cljc/edn), Scheme (R7RS, Guile, Chicken),
+  Racket, Emacs Lisp, Fennel and Janet. Each is a TOML data file, so you can extend or override
+  it, or add a new dialect with `extends`.
+- **Static:** llsp never evaluates your code. It runs no reader macros, no `#.`, no build tools
+  and no subprocesses, and opens no network connections.
+- **Configurable:** every setting can come from a file, an environment variable, the command
+  line or the editor.
+
+## Install
+
+```sh
+cargo install --git https://github.com/victorzhuk/llsp
+```
+
+## Editor setup
+
+Start `llsp` with no arguments. It speaks LSP over stdio. For example, in Neovim:
+
+```lua
+vim.lsp.config('llsp', {
+  cmd = { 'llsp' },
+  filetypes = { 'lisp', 'clojure', 'scheme', 'racket', 'elisp', 'fennel', 'janet' },
+  root_markers = { '.llsp.toml', '.git' },
+})
+vim.lsp.enable('llsp')
+```
+
+`llsp serve --listen 127.0.0.1:9257` serves a single client over TCP. Only loopback addresses
+are accepted.
+
+## Command line
+
+```
+llsp [--config PATH] [--set KEY=VALUE]... [--log-level LEVEL] [--log-file PATH] [COMMAND]
+
+  serve      serve LSP (default)
+  check      report diagnostics for files or directories; exit 1 on errors, 2 on I/O errors
+  config     print the effective configuration
+  dialects   list dialects and their file extensions
+```
+
+`check`, `config` and `dialects` accept `--format text|json`. When `--format` isn't given, the
+output is text on a terminal and JSON otherwise, so both scripts and CI can parse it.
+
+## Configuration
+
+Sources are merged in this order, with later sources winning. Tables merge key by key; any
+other value is replaced.
+
+1. Built-in defaults (`llsp config` prints the effective result)
+2. User file: `$XDG_CONFIG_HOME/llsp/config.toml`, or `--config PATH` / `LLSP_CONFIG`
+3. Project file: `.llsp.toml` in the workspace root
+4. Environment: `LLSP_<SECTION>__<KEY>=value`, for example `LLSP_FORMAT__BODY_INDENT=4`.
+   Values are parsed as TOML literals and fall back to strings.
+5. Command line: `--set format.body_indent=4`
+6. `initializationOptions` sent by the editor
+7. `workspace/didChangeConfiguration` settings, either as the whole object or under an
+   `llsp` key
+
+Unknown keys are rejected. At startup the server exits with an error. When the editor sends
+a bad setting, llsp shows a warning and keeps the previous configuration.
+
+```toml
+[files]
+default_dialect = "common-lisp"   # used when nothing else matches
+max_file_size = 8388608           # larger files are not analyzed
+
+[files.associations]              # glob -> dialect; checked first
+"*.lsp" = "emacs-lisp"
+
+[workspace]
+index = true
+exclude = ["**/node_modules/**", "**/target/**"]
+max_files = 20000
+
+[format]
+body_indent = 2
+distinguished_indent = 4
+trim_trailing_whitespace = true
+
+[log]
+level = "warn"                    # or --log-level / LLSP_LOG
+# file = "/path/to/llsp.log"      # created with mode 0600
+
+# Extend a built-in dialect:
+[dialects.clojure.defs]
+defroute = { kind = "function", params = "vector" }
+
+# Add a dialect:
+[dialects.lfe]
+extends = "common-lisp"
+extensions = ["lfe"]
+case_sensitive = true
+```
+
+### Dialect detection
+
+For each file, llsp takes the first of these that matches:
+
+1. `files.associations`
+2. The editor's `languageId`
+3. A `#lang` line or `-*- mode: X -*-` modeline on the first line
+4. The file extension
+5. `files.default_dialect`
+
+The built-in dialect definitions live in [`dialects/`](dialects). A dialect definition covers:
+
+- **Reader rules:** brackets, comments, character literals, prefixes and how many forms each
+  prefix takes
+- **Definition forms:** where the name and parameters are
+- **Binding forms**
+- **Indentation specs**
+- **Special forms and builtins**
+
 ## Development
 
 ```sh
@@ -11,6 +125,8 @@ task lint    # rustfmt + clippy
 task bench   # criterion benchmarks
 task spec    # validate OpenSpec specs and changes
 ```
+
+Changes are specified first under [`openspec/`](openspec).
 
 ## License
 

@@ -1,3 +1,224 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+
+use crate::dialect::Dialects;
+
+pub const PROJECT_FILE: &str = ".llsp.toml";
+const ENV_PREFIX: &str = "LLSP_";
+const RESERVED_ENV: &[&str] = &["LLSP_CONFIG", "LLSP_LOG"];
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    pub files: Files,
+    pub workspace: Workspace,
+    pub format: Format,
+    pub log: Log,
+    pub dialects: toml::Table,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Files {
+    /// Glob (matched against the path) to dialect name.
+    pub associations: BTreeMap<String, String>,
+    pub default_dialect: String,
+    pub max_file_size: u64,
+}
+
+impl Default for Files {
+    fn default() -> Self {
+        Self {
+            associations: BTreeMap::new(),
+            default_dialect: "common-lisp".into(),
+            max_file_size: 8 << 20,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Workspace {
+    pub index: bool,
+    pub exclude: Vec<String>,
+    pub max_files: usize,
+}
+
+impl Default for Workspace {
+    fn default() -> Self {
+        Self {
+            index: true,
+            exclude: vec![
+                "**/node_modules/**".into(),
+                "**/target/**".into(),
+                "**/.cpcache/**".into(),
+                "**/.shadow-cljs/**".into(),
+                "**/.clj-kondo/**".into(),
+            ],
+            max_files: 20_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Format {
+    pub body_indent: u32,
+    pub distinguished_indent: u32,
+    pub trim_trailing_whitespace: bool,
+}
+
+impl Default for Format {
+    fn default() -> Self {
+        Self {
+            body_indent: 2,
+            distinguished_indent: 4,
+            trim_trailing_whitespace: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Log {
+    pub level: String,
+    pub file: Option<PathBuf>,
+}
+
+impl Default for Log {
+    fn default() -> Self {
+        Self {
+            level: "warn".into(),
+            file: None,
+        }
+    }
+}
+
+/// Configuration sources, lowest precedence first.
+#[derive(Debug, Clone, Default)]
+pub struct Layers {
+    pub user: toml::Table,
+    pub project: toml::Table,
+    pub env: toml::Table,
+    pub cli: toml::Table,
+    pub init: toml::Table,
+    pub client: toml::Table,
+}
+
+impl Layers {
+    /// Reads the user file, environment and `--set` pairs. The project layer is
+    /// loaded later, once the workspace root is known.
+    pub fn startup(config_path: Option<&Path>, sets: &[String]) -> Result<Self> {
+        let user = match config_path {
+            Some(p) => read_table(p)?,
+            None => match user_config_path() {
+                Some(p) if p.is_file() => read_table(&p)?,
+                _ => toml::Table::new(),
+            },
+        };
+        let mut cli = toml::Table::new();
+        for set in sets {
+            let Some((key, value)) = set.split_once('=') else {
+                bail!("--set expects key=value, got {set:?}");
+            };
+            insert_path(
+                &mut cli,
+                key.split('.').map(str::trim),
+                parse_value(value.trim()),
+            )?;
+        }
+        Ok(Self {
+            user,
+            env: env_table(std::env::vars())?,
+            cli,
+            ..Self::default()
+        })
+    }
+
+    pub fn load_project(&mut self, root: &Path) -> Result<()> {
+        let path = root.join(PROJECT_FILE);
+        self.project = if path.is_file() {
+            read_table(&path)?
+        } else {
+            toml::Table::new()
+        };
+        Ok(())
+    }
+
+    pub fn merged(&self) -> toml::Table {
+        let mut out = toml::Table::new();
+        for layer in [
+            &self.user,
+            &self.project,
+            &self.env,
+            &self.cli,
+            &self.init,
+            &self.client,
+        ] {
+            merge_tables(&mut out, layer.clone());
+        }
+        out
+    }
+
+    pub fn resolve(&self) -> Result<Settings> {
+        Settings::from_table(self.merged())
+    }
+}
+
+/// Validated configuration plus the dialects it defines.
+#[derive(Debug, Clone)]
+pub struct Settings {
+    pub config: Config,
+    pub dialects: Dialects,
+    pub associations: Vec<(globset::GlobMatcher, String)>,
+}
+
+impl Settings {
+    pub fn from_table(table: toml::Table) -> Result<Self> {
+        let config: Config = table
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("config: {e}"))?;
+        let dialects = Dialects::load(&config.dialects)?;
+        let mut associations = Vec::new();
+        for (glob, name) in &config.files.associations {
+            if dialects.get(name).is_none() {
+                bail!("files.associations: unknown dialect {name:?} for {glob:?}");
+            }
+            let matcher = globset::GlobBuilder::new(glob)
+                .literal_separator(false)
+                .build()
+                .with_context(|| format!("files.associations: bad glob {glob:?}"))?
+                .compile_matcher();
+            associations.push((matcher, name.clone()));
+        }
+        if dialects.get(&config.files.default_dialect).is_none() {
+            bail!(
+                "files.default_dialect: unknown dialect {:?}",
+                config.files.default_dialect
+            );
+        }
+        Ok(Self {
+            config,
+            dialects,
+            associations,
+        })
+    }
+}
+
+pub fn user_config_path() -> Option<PathBuf> {
+    use etcetera::BaseStrategy;
+    let base = etcetera::choose_base_strategy().ok()?;
+    Some(base.config_dir().join("llsp").join("config.toml"))
+}
+
+fn read_table(path: &Path) -> Result<toml::Table> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    toml::from_str(&text).with_context(|| format!("parse {}", path.display()))
+}
+
 /// Deep-merges `over` into `base`: tables merge recursively, anything else is replaced.
 pub fn merge_tables(base: &mut toml::Table, over: toml::Table) {
     for (key, value) in over {
@@ -7,5 +228,198 @@ pub fn merge_tables(base: &mut toml::Table, over: toml::Table) {
                 base.insert(key, value);
             }
         }
+    }
+}
+
+pub fn env_table(vars: impl IntoIterator<Item = (String, String)>) -> Result<toml::Table> {
+    let mut out = toml::Table::new();
+    for (key, value) in vars {
+        if !key.starts_with(ENV_PREFIX) || RESERVED_ENV.contains(&key.as_str()) {
+            continue;
+        }
+        let path = key[ENV_PREFIX.len()..]
+            .split("__")
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>();
+        insert_path(
+            &mut out,
+            path.iter().map(String::as_str),
+            parse_value(&value),
+        )
+        .with_context(|| format!("env {key}"))?;
+    }
+    Ok(out)
+}
+
+fn parse_value(raw: &str) -> toml::Value {
+    toml::from_str::<toml::Table>(&format!("v = {raw}"))
+        .ok()
+        .and_then(|mut t| t.remove("v"))
+        .unwrap_or_else(|| toml::Value::String(raw.to_owned()))
+}
+
+fn insert_path<'a>(
+    table: &mut toml::Table,
+    path: impl Iterator<Item = &'a str>,
+    value: toml::Value,
+) -> Result<()> {
+    let keys: Vec<&str> = path.collect();
+    let Some((last, parents)) = keys.split_last() else {
+        bail!("empty key");
+    };
+    if keys.iter().any(|k| k.is_empty()) {
+        bail!("empty key segment in {}", keys.join("."));
+    }
+    let mut cur = table;
+    for k in parents {
+        let entry = cur
+            .entry((*k).to_owned())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        let toml::Value::Table(t) = entry else {
+            bail!("{k} is not a table");
+        };
+        cur = t;
+    }
+    cur.insert((*last).to_owned(), value);
+    Ok(())
+}
+
+pub fn json_to_table(value: serde_json::Value) -> Result<toml::Table> {
+    match json_to_toml(value) {
+        Some(toml::Value::Table(t)) => Ok(t),
+        None => Ok(toml::Table::new()),
+        Some(other) => bail!("expected an object, got {}", other.type_str()),
+    }
+}
+
+fn json_to_toml(value: serde_json::Value) -> Option<toml::Value> {
+    use serde_json::Value as J;
+    Some(match value {
+        J::Null => return None,
+        J::Bool(b) => toml::Value::Boolean(b),
+        J::Number(n) => match n.as_i64() {
+            Some(i) => toml::Value::Integer(i),
+            None => toml::Value::Float(n.as_f64()?),
+        },
+        J::String(s) => toml::Value::String(s),
+        J::Array(a) => toml::Value::Array(a.into_iter().filter_map(json_to_toml).collect()),
+        J::Object(o) => toml::Value::Table(
+            o.into_iter()
+                .filter_map(|(k, v)| Some((k, json_to_toml(v)?)))
+                .collect(),
+        ),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table(src: &str) -> toml::Table {
+        toml::from_str(src).unwrap()
+    }
+
+    #[test]
+    fn defaults_are_valid() {
+        let s = Layers::default().resolve().unwrap();
+        assert_eq!(s.config.format.body_indent, 2);
+        assert_eq!(s.config.files.default_dialect, "common-lisp");
+        assert!(s.config.workspace.index);
+    }
+
+    #[test]
+    fn unknown_key_is_named() {
+        let err = Settings::from_table(table("[fromat]\nx = 1")).unwrap_err();
+        assert!(format!("{err:#}").contains("fromat"), "{err:#}");
+    }
+
+    #[test]
+    fn wrong_type_is_named() {
+        let err = Settings::from_table(table("[format]\nbody_indent = \"x\"")).unwrap_err();
+        assert!(format!("{err:#}").contains("body_indent"), "{err:#}");
+    }
+
+    #[test]
+    fn precedence() {
+        let layers = Layers {
+            project: table("[format]\nbody_indent = 2\ndistinguished_indent = 6"),
+            env: env_table([("LLSP_FORMAT__BODY_INDENT".into(), "4".into())]).unwrap(),
+            ..Layers::default()
+        };
+        let s = layers.resolve().unwrap();
+        assert_eq!(s.config.format.body_indent, 4);
+        assert_eq!(s.config.format.distinguished_indent, 6);
+
+        let layers = Layers {
+            cli: table("[format]\nbody_indent = 3"),
+            init: json_to_table(serde_json::json!({"format": {"body_indent": 5}})).unwrap(),
+            ..Layers::default()
+        };
+        assert_eq!(layers.resolve().unwrap().config.format.body_indent, 5);
+    }
+
+    #[test]
+    fn env_mapping() {
+        let t = env_table([
+            ("LLSP_WORKSPACE__INDEX".into(), "false".into()),
+            ("LLSP_LOG__FILE".into(), "/var/log/llsp.log".into()),
+            ("LLSP_CONFIG".into(), "ignored".into()),
+            ("LLSP_LOG".into(), "debug".into()),
+            ("OTHER".into(), "x".into()),
+        ])
+        .unwrap();
+        assert_eq!(
+            t,
+            table("[workspace]\nindex = false\n[log]\nfile = \"/var/log/llsp.log\"")
+        );
+        let s = Settings::from_table(t).unwrap();
+        assert!(!s.config.workspace.index);
+    }
+
+    #[test]
+    fn cli_sets() {
+        let l = Layers::startup(
+            Some(Path::new("/nonexistent/llsp.toml")),
+            &["format.body_indent=3".into()],
+        );
+        assert!(l.is_err(), "missing explicit config file is an error");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.toml");
+        std::fs::write(&path, "[workspace]\nmax_files = 10").unwrap();
+        let l = Layers::startup(Some(&path), &["format.body_indent = 3".into()]).unwrap();
+        let s = l.resolve().unwrap();
+        assert_eq!(s.config.format.body_indent, 3);
+        assert_eq!(s.config.workspace.max_files, 10);
+        assert!(Layers::startup(Some(&path), &["novalue".into()]).is_err());
+    }
+
+    #[test]
+    fn json_nulls_dropped() {
+        let t = json_to_table(serde_json::json!({"log": {"file": null, "level": "info"}})).unwrap();
+        assert_eq!(t, table("[log]\nlevel = \"info\""));
+        assert!(json_to_table(serde_json::json!([1])).is_err());
+        assert!(json_to_table(serde_json::Value::Null).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_association_dialect() {
+        let err =
+            Settings::from_table(table("[files.associations]\n\"*.x\" = \"nope\"")).unwrap_err();
+        assert!(err.to_string().contains("nope"), "{err}");
+    }
+
+    #[test]
+    fn dialect_override_through_config() {
+        let s = Settings::from_table(table(
+            "[dialects.clojure.defs]\ndefroute = { kind = \"function\" }",
+        ))
+        .unwrap();
+        assert!(
+            s.dialects
+                .get("clojure")
+                .unwrap()
+                .def_spec("defroute")
+                .is_some()
+        );
     }
 }
