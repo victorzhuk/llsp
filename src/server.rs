@@ -8,9 +8,11 @@ use lsp_types::notification::{self as notif, Notification as _};
 use lsp_types::request::{self as req, Request as _};
 use lsp_types::{
     CompletionOptions, DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher,
-    GlobPattern, HoverProviderCapability, InitializeParams, InitializeResult, MessageType, OneOf,
-    PositionEncodingKind, PublishDiagnosticsParams, Registration, RegistrationParams,
-    RenameOptions, ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelpOptions,
+    FoldingRangeProviderCapability, GlobPattern, HoverProviderCapability, InitializeParams,
+    InitializeResult, MessageType, OneOf, PositionEncodingKind, PublishDiagnosticsParams,
+    Registration, RegistrationParams, RenameOptions, SelectionRangeProviderCapability,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensServerCapabilities,
+    ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Uri,
 };
@@ -188,6 +190,16 @@ fn capabilities(enc: Encoding) -> ServerCapabilities {
             work_done_progress_options: Default::default(),
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                legend: crate::features::legend(),
+                range: Some(true),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                work_done_progress_options: Default::default(),
+            },
+        )),
         ..Default::default()
     }
 }
@@ -316,6 +328,16 @@ impl Server {
                 self.handle::<req::SignatureHelpRequest>(id, params, Self::signature_help)
             }
             req::HoverRequest::METHOD => self.handle::<req::HoverRequest>(id, params, Self::hover),
+            req::FoldingRangeRequest::METHOD => {
+                self.handle::<req::FoldingRangeRequest>(id, params, Self::folding_ranges)
+            }
+            req::SelectionRangeRequest::METHOD => {
+                self.handle::<req::SelectionRangeRequest>(id, params, Self::selection_ranges)
+            }
+            req::SemanticTokensFullRequest::METHOD => self
+                .handle::<req::SemanticTokensFullRequest>(id, params, Self::semantic_tokens_full),
+            req::SemanticTokensRangeRequest::METHOD => self
+                .handle::<req::SemanticTokensRangeRequest>(id, params, Self::semantic_tokens_range),
             _ => Response::new_err(
                 id,
                 ErrorCode::MethodNotFound as i32,

@@ -1,6 +1,9 @@
 mod assist;
 mod navigation;
+mod structure;
 mod symbols;
+
+pub(crate) use structure::legend;
 
 use lsp_types::{Location, Position, Range, Uri};
 
