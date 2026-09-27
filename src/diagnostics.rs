@@ -136,11 +136,12 @@ fn unresolved_calls(
     is_defined: &impl Fn(&str) -> bool,
     out: &mut Vec<Diagnostic>,
 ) {
-    let known: Vec<String> = cfg
+    let known: FxHashSet<String> = cfg
         .known_symbols
         .iter()
         .map(|s| d.normalize(s).into_owned())
         .collect();
+    let local: FxHashSet<&str> = a.defs.iter().map(|def| def.key.as_str()).collect();
     for o in &a.occurrences {
         if o.target != Target::Global || o.qualifier.is_some() {
             continue;
@@ -158,8 +159,8 @@ fn unresolved_calls(
         if d.is_special_form(key)
             || d.is_builtin(key)
             || d.is_constant(key)
-            || known.iter().any(|k| k == key)
-            || a.defs.iter().any(|def| def.key == key)
+            || known.contains(key)
+            || local.contains(key)
             || is_defined(key)
         {
             continue;

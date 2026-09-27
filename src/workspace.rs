@@ -87,15 +87,38 @@ impl FileSummary {
 #[derive(Debug, Default)]
 pub struct Index {
     files: FxHashMap<Uri, Arc<FileSummary>>,
+    by_def: FxHashMap<String, Vec<Arc<FileSummary>>>,
 }
 
 impl Index {
     pub fn insert(&mut self, summary: FileSummary) {
-        self.files.insert(summary.uri.clone(), Arc::new(summary));
+        let file = Arc::new(summary);
+        for key in file.def_keys.keys() {
+            self.by_def
+                .entry(key.clone())
+                .or_default()
+                .push(file.clone());
+        }
+        if let Some(old) = self.files.insert(file.uri.clone(), file) {
+            self.unlink(&old);
+        }
     }
 
     pub fn remove(&mut self, uri: &Uri) {
-        self.files.remove(uri);
+        if let Some(old) = self.files.remove(uri) {
+            self.unlink(&old);
+        }
+    }
+
+    fn unlink(&mut self, old: &Arc<FileSummary>) {
+        for key in old.def_keys.keys() {
+            if let Some(files) = self.by_def.get_mut(key) {
+                files.retain(|f| !Arc::ptr_eq(f, old));
+                if files.is_empty() {
+                    self.by_def.remove(key);
+                }
+            }
+        }
     }
 
     pub fn get(&self, uri: &Uri) -> Option<&Arc<FileSummary>> {
@@ -114,13 +137,15 @@ impl Index {
         self.files.values()
     }
 
-    /// Definitions named `key` in files of the same dialect family (same case rules).
+    /// Definitions named `key` in any file; callers filter by dialect.
     pub fn defs_named<'a>(
         &'a self,
         key: &'a str,
     ) -> impl Iterator<Item = (&'a Arc<FileSummary>, &'a Def)> + 'a {
-        self.files
-            .values()
+        self.by_def
+            .get(key)
+            .into_iter()
+            .flatten()
             .flat_map(move |f| f.defs_named(key).map(move |d| (f, d)))
     }
 
@@ -298,6 +323,28 @@ mod tests {
             &dir.path().join("link/secret.lisp")
         ));
         assert!(is_inside(&[root], &dir.path().join("a.lisp")));
+    }
+
+    #[test]
+    fn index_replace_and_remove_update_names() {
+        let s = settings("");
+        let d = s.dialects.get("common-lisp").unwrap().clone();
+        let uri = |n: &str| path_to_uri(Path::new(n)).unwrap();
+        let file = |n: &str, text: &str| FileSummary::from_text(uri(n), d.clone(), text.into());
+        let mut index = Index::default();
+        index.insert(file("/a.lisp", "(defun f ()) (defun g ())"));
+        index.insert(file("/b.lisp", "(defun f ())"));
+        assert_eq!(index.defs_named("f").count(), 2);
+
+        index.insert(file("/a.lisp", "(defun h ())"));
+        assert_eq!(index.defs_named("f").count(), 1);
+        assert_eq!(index.defs_named("g").count(), 0);
+        assert_eq!(index.defs_named("h").count(), 1);
+
+        index.remove(&uri("/b.lisp"));
+        index.remove(&uri("/missing.lisp"));
+        assert_eq!(index.defs_named("f").count(), 0);
+        assert!(index.by_def.keys().eq(["h"]));
     }
 
     #[test]
