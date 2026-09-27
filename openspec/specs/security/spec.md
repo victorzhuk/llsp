@@ -38,3 +38,7 @@ their owner.
 #### Scenario: Log file mode
 - **WHEN** the server starts with `--log-file` on a Unix system
 - **THEN** the file is created with mode 0600
+
+#### Scenario: Project file sets logging
+- **WHEN** the workspace `.llsp.toml` contains a `[log]` section
+- **THEN** it is ignored, and logging is configured only by the user file, environment, command line and editor

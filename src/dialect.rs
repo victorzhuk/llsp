@@ -211,8 +211,11 @@ impl Dialect {
         if r.comma_whitespace {
             table[b',' as usize] |= STOP;
         }
+        if !r.terminators.is_ascii() {
+            bail!("dialect {}: terminators must be ASCII", self.name);
+        }
         for pair in &r.brackets {
-            let &[open, close] = pair.as_bytes() else {
+            let (&[open, close], true) = (pair.as_bytes(), pair.is_ascii()) else {
                 bail!(
                     "dialect {}: bracket pair {pair:?} must be two ASCII chars",
                     self.name
@@ -509,6 +512,15 @@ case_sensitive = true"#,
         ))
         .unwrap_err();
         assert!(err.to_string().contains("cycle"), "{err}");
+    }
+
+    #[test]
+    fn non_ascii_reader_rules_are_rejected() {
+        let err =
+            Dialects::load(&table("[common-lisp.reader]\nbrackets = [\"()\", \"é\"]")).unwrap_err();
+        assert!(err.to_string().contains("bracket pair"), "{err}");
+        let err = Dialects::load(&table("[common-lisp.reader]\nterminators = \"é\"")).unwrap_err();
+        assert!(err.to_string().contains("terminators"), "{err}");
     }
 
     #[test]
