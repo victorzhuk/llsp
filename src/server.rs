@@ -449,8 +449,7 @@ impl Server {
             .settings
             .detect(path.as_deref(), Some(&doc.language_id), &doc.text);
         let max = self.settings.config.files.max_file_size;
-        let mut document = Document::new(doc.text, doc.version, dialect, max);
-        document.client_uri = doc.uri;
+        let document = Document::new(doc.uri, doc.text, doc.version, dialect, max);
         if document.oversized() {
             self.warn_oversized(&document);
         }
@@ -550,8 +549,13 @@ impl Server {
             let path = uri_to_path(&uri);
             let dialect = self.settings.detect(path.as_deref(), None, doc.text());
             let max = self.settings.config.files.max_file_size;
-            let mut fresh = Document::new(doc.text().to_owned(), doc.version, dialect, max);
-            fresh.client_uri = doc.client_uri.clone();
+            let fresh = Document::new(
+                doc.client_uri.clone(),
+                doc.text().to_owned(),
+                doc.version,
+                dialect,
+                max,
+            );
             self.docs.insert(uri, fresh);
         }
     }

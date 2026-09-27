@@ -10,7 +10,7 @@ use llsp::config::{Layers, Settings};
 use llsp::diagnostics::{self, Severity};
 use llsp::document::{Encoding, path_to_uri, to_position};
 use llsp::syntax::Tree;
-use llsp::workspace::{FileSummary, Index};
+use llsp::workspace::{self, FileSummary, Index};
 use lsp_server::Connection;
 
 #[derive(Parser)]
@@ -262,14 +262,13 @@ fn check(settings: &Settings, paths: &[PathBuf], json: bool) -> Result<ExitCode>
         writeln!(out)?;
     } else {
         for r in &reports {
-            let sev = serde_json::to_value(r.severity)?;
             writeln!(
                 out,
                 "{}:{}:{}: {}[{}]: {}",
                 r.path,
                 r.line,
                 r.column,
-                sev.as_str().unwrap_or_default(),
+                r.severity.as_str(),
                 r.code,
                 r.message
             )?;
@@ -348,18 +347,19 @@ fn collect_files(settings: &Settings, paths: &[PathBuf]) -> Vec<PathBuf> {
             out.push(path.clone());
             continue;
         }
-        for entry in ignore::WalkBuilder::new(path).build().flatten() {
-            let p = entry.path();
-            let known = p
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| settings.dialects.by_extension(e).is_some());
-            if entry.file_type().is_some_and(|t| t.is_file()) && known {
-                out.push(p.to_path_buf());
-            }
+        let (files, truncated) = workspace::discover(settings, std::slice::from_ref(path));
+        if truncated {
+            eprintln!(
+                "llsp: {}: over workspace.max_files ({}); only the first {} files are processed",
+                path.display(),
+                settings.config.workspace.max_files,
+                files.len()
+            );
         }
+        out.extend(files);
     }
     out.sort();
+    out.dedup();
     out
 }
 
