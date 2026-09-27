@@ -368,6 +368,8 @@ impl Server {
                 return Response::new_err(id, ErrorCode::InvalidParams as i32, e.to_string());
             }
         };
+        // Request handlers only read state, so recovering is safe; sync notifications are
+        // not wrapped because a panic mid-edit would leave the document silently wrong.
         match catch_unwind(AssertUnwindSafe(|| f(self, params))) {
             Ok(Ok(result)) => Response::new_ok(id, result),
             Ok(Err(e)) => Response::new_err(id, e.code, e.message),
@@ -410,8 +412,8 @@ impl Server {
         N::Params: DeserializeOwned,
     {
         let params = serde_json::from_value(n.params)?;
-        catch_unwind(AssertUnwindSafe(|| f(self, params)))
-            .map_err(|panic| anyhow::anyhow!("panicked: {}", panic_message(&*panic)))
+        f(self, params);
+        Ok(())
     }
 
     fn send(&self, msg: Message) {
