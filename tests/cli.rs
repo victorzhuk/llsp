@@ -6,6 +6,7 @@ fn llsp(dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(dir)
         .env("XDG_CONFIG_HOME", dir.join("xdg"))
+        .env("APPDATA", dir.join("xdg"))
         .env("HOME", dir)
         .env_remove("LLSP_CONFIG")
         .env_remove("LLSP_LOG")
