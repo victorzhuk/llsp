@@ -84,6 +84,8 @@ other value is replaced.
 7. `workspace/didChangeConfiguration` settings, either as the whole object or under an
    `llsp` key
 
+The project file is part of the repository, so its `[log]` section is ignored.
+
 Unknown keys are rejected. At startup the server exits with an error. When the editor sends
 a bad setting, llsp shows a warning and keeps the previous configuration.
 
