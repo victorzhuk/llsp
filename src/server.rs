@@ -808,6 +808,26 @@ mod tests {
     }
 
     #[test]
+    fn watched_events_do_not_override_open_documents() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let path = root.join("a.lisp");
+        std::fs::write(&path, "(defun disk ())").unwrap();
+        let (mut s, _client) = server(&root);
+        let uri = path_to_uri(&path).unwrap();
+        open(&mut s, &uri, "(defun live ())");
+        for typ in [FileChangeType::CHANGED, FileChangeType::DELETED] {
+            s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {
+                changes: vec![lsp_types::FileEvent {
+                    uri: uri.clone(),
+                    typ,
+                }],
+            });
+            assert_eq!(def_names(&s, &uri), ["live"]);
+        }
+    }
+
+    #[test]
     fn indexing_can_be_disabled() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.lisp"), "(defun a ())").unwrap();
