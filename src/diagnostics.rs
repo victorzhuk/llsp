@@ -15,6 +15,15 @@ pub enum Severity {
 }
 
 impl Severity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+            Self::Hint => "hint",
+        }
+    }
+
     fn from_level(level: Level) -> Option<Self> {
         match level {
             Level::Off => None,
