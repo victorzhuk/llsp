@@ -284,7 +284,10 @@ fn check_directory_follows_workspace_rules() {
     write("ignored/x.lisp", "(");
     write(".gitignore", "ignored/\n");
     write("script.lsp", "(");
-    write(".llsp.toml", "[files.associations]\n\"*.lsp\" = \"emacs-lisp\"\n");
+    write(
+        ".llsp.toml",
+        "[files.associations]\n\"*.lsp\" = \"emacs-lisp\"\n",
+    );
     let out = llsp(dir.path(), &["check", "."]);
     assert_eq!(out.status.code(), Some(1));
     let mut paths: Vec<String> = json(&out)
