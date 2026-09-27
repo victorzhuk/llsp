@@ -1,3 +1,4 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -247,17 +248,15 @@ impl Server {
                 if generation != self.scan_generation {
                     return;
                 }
-                let n = files.len();
+                log::info!("indexed {} files", files.len());
+                self.index = Index::default();
                 for f in files {
                     if !self.docs.contains_key(&f.uri) {
                         self.index.insert(f);
                     }
                 }
-                log::info!("indexed {n} files");
-                let open: Vec<Uri> = self.docs.keys().cloned().collect();
-                for uri in open {
-                    self.publish_diagnostics(&uri);
-                }
+                self.reindex_open_documents();
+                self.publish_open_documents();
             }
         }
     }
@@ -369,9 +368,14 @@ impl Server {
                 return Response::new_err(id, ErrorCode::InvalidParams as i32, e.to_string());
             }
         };
-        match f(self, params) {
-            Ok(result) => Response::new_ok(id, result),
-            Err(e) => Response::new_err(id, e.code, e.message),
+        match catch_unwind(AssertUnwindSafe(|| f(self, params))) {
+            Ok(Ok(result)) => Response::new_ok(id, result),
+            Ok(Err(e)) => Response::new_err(id, e.code, e.message),
+            Err(panic) => {
+                let message = format!("{} panicked: {}", R::METHOD, panic_message(&*panic));
+                log::error!("{message}");
+                Response::new_err(id, ErrorCode::InternalError as i32, message)
+            }
         }
     }
 
@@ -406,8 +410,8 @@ impl Server {
         N::Params: DeserializeOwned,
     {
         let params = serde_json::from_value(n.params)?;
-        f(self, params);
-        Ok(())
+        catch_unwind(AssertUnwindSafe(|| f(self, params)))
+            .map_err(|panic| anyhow::anyhow!("panicked: {}", panic_message(&*panic)))
     }
 
     fn send(&self, msg: Message) {
@@ -528,8 +532,11 @@ impl Server {
                 self.layers = layers;
                 self.settings = settings;
                 self.reload_documents();
-                self.index = Index::default();
+                if !self.settings.config.workspace.index {
+                    self.index = Index::default();
+                }
                 self.reindex_open_documents();
+                self.publish_open_documents();
                 self.start_scan();
             }
             Err(e) => self.show_warning(format!("llsp: configuration ignored: {e:#}")),
@@ -545,8 +552,13 @@ impl Server {
             let max = self.settings.config.files.max_file_size;
             let mut fresh = Document::new(doc.text().to_owned(), doc.version, dialect, max);
             fresh.client_uri = doc.client_uri.clone();
-            self.docs.insert(uri.clone(), fresh);
-            self.publish_diagnostics(&uri);
+            self.docs.insert(uri, fresh);
+        }
+    }
+
+    fn publish_open_documents(&self) {
+        for uri in self.docs.keys() {
+            self.publish_diagnostics(uri);
         }
     }
 
@@ -632,6 +644,14 @@ impl Server {
             version: Some(doc.version),
         });
     }
+}
+
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown panic")
 }
 
 #[cfg(test)]
@@ -742,6 +762,45 @@ mod tests {
             changes: vec![event(uri.clone(), FileChangeType::DELETED)],
         });
         assert!(s.index.is_empty());
+    }
+
+    #[test]
+    fn config_change_keeps_index_until_rescan() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::write(root.join("a.lisp"), "(defun helper ())").unwrap();
+        std::fs::write(root.join("gone.lisp"), "(defun gone ())").unwrap();
+        let (mut s, _client) = server(&root);
+        scan_now(&mut s);
+        std::fs::remove_file(root.join("gone.lisp")).unwrap();
+
+        s.did_change_configuration(lsp_types::DidChangeConfigurationParams {
+            settings: serde_json::json!({"format": {"body_indent": 3}}),
+        });
+        assert_eq!(s.index.defs_named("helper").count(), 1);
+
+        let ev = s.events.1.recv().unwrap();
+        s.on_event(ev);
+        assert_eq!(s.index.defs_named("helper").count(), 1);
+        assert_eq!(
+            s.index.defs_named("gone").count(),
+            0,
+            "rescan drops stale files"
+        );
+    }
+
+    #[test]
+    fn handler_panic_becomes_internal_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _client) = server(dir.path());
+        let params = serde_json::json!({
+            "textDocument": {"uri": "file:///a.lisp"},
+            "position": {"line": 0, "character": 0}
+        });
+        let resp = s.handle::<req::HoverRequest>(RequestId::from(1), params, |_, _| panic!("boom"));
+        let err = resp.response_result.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InternalError as i32);
+        assert!(err.message.contains("boom"), "{}", err.message);
     }
 
     #[test]
