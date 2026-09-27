@@ -6,6 +6,7 @@ fn llsp(dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(dir)
         .env("XDG_CONFIG_HOME", dir.join("xdg"))
+        .env("APPDATA", dir.join("xdg"))
         .env("HOME", dir)
         .env_remove("LLSP_CONFIG")
         .env_remove("LLSP_LOG")
@@ -269,4 +270,52 @@ fn log_file_is_private() {
     assert!(out.status.success());
     let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn check_directory_follows_workspace_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = |rel: &str, text: &str| {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    write("src/a.lisp", "(");
+    write("target/gen.lisp", "(");
+    write("ignored/x.lisp", "(");
+    write(".gitignore", "ignored/\n");
+    write("script.lsp", "(");
+    write(
+        ".llsp.toml",
+        "[files.associations]\n\"*.lsp\" = \"emacs-lisp\"\n",
+    );
+    let out = llsp(dir.path(), &["check", "."]);
+    assert_eq!(out.status.code(), Some(1));
+    let mut paths: Vec<String> = json(&out)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["path"].as_str().unwrap().replace('\\', "/"))
+        .collect();
+    paths.sort();
+    assert_eq!(paths, ["./script.lsp", "./src/a.lisp"]);
+}
+
+#[test]
+fn format_unreadable_files_exit_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = llsp(dir.path(), &["format", "nope.lisp"]);
+    assert_eq!(out.status.code(), Some(2));
+
+    std::fs::write(dir.path().join("big.lisp"), "(defun f ()\n(g))\n").unwrap();
+    let out = llsp(
+        dir.path(),
+        &["format", "big.lisp", "--set", "files.max_file_size=5"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("max_file_size"));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("big.lisp")).unwrap(),
+        "(defun f ()\n(g))\n"
+    );
 }

@@ -216,6 +216,10 @@ impl Server {
             .collect();
         let def_names: FxHashMap<u32, SymbolKind> =
             a.defs.iter().map(|x| (x.name_start, x.kind)).collect();
+        let mut def_kinds: FxHashMap<&str, SymbolKind> = FxHashMap::default();
+        for x in &a.defs {
+            def_kinds.entry(x.key.as_str()).or_insert(x.kind);
+        }
         let commented: Vec<(u32, u32)> = tree
             .preorder(Tree::ROOT)
             .filter(|&id| tree.node(id).kind == NodeKind::DatumComment)
@@ -231,13 +235,23 @@ impl Server {
                 .is_some_and(|n| n.kind == TokenKind::String)
         };
         let mut raw: Vec<(u32, u32, Ty, u32)> = Vec::new();
+        let mut next_comment = 0;
         for (i, t) in tokens.iter().enumerate() {
             if let Some((s, e)) = range
                 && (t.end <= s || t.start >= e)
             {
                 continue;
             }
-            if let Some(&(s, e)) = commented.iter().find(|&&(s, e)| s <= t.start && t.end <= e) {
+            while commented
+                .get(next_comment)
+                .is_some_and(|&(_, e)| e <= t.start)
+            {
+                next_comment += 1;
+            }
+            if let Some(&(s, e)) = commented
+                .get(next_comment)
+                .filter(|&&(s, e)| s <= t.start && t.end <= e)
+            {
                 if t.start == s {
                     raw.push((s, e, Ty::Comment, 0));
                 }
@@ -268,7 +282,7 @@ impl Server {
                             let q = o.qualifier.as_deref().unwrap_or_default().len() as u32;
                             raw.push((t.start, t.start + q, Ty::Namespace, 0));
                         }
-                        if let Some((ty, m)) = self.classify(doc, o, &def_names) {
+                        if let Some((ty, m)) = self.classify(doc, o, &def_names, &def_kinds) {
                             raw.push((o.start, o.end, ty, m));
                         }
                     }
@@ -287,6 +301,7 @@ impl Server {
         doc: &Document,
         o: &crate::analysis::Occurrence,
         def_names: &FxHashMap<u32, SymbolKind>,
+        def_kinds: &FxHashMap<&str, SymbolKind>,
     ) -> Option<(Ty, u32)> {
         let a = doc.analysis();
         let d = &doc.dialect;
@@ -301,8 +316,7 @@ impl Server {
         if o.qualifier.is_none() && d.is_special_form(&o.key) {
             return Some((Ty::Keyword, 0));
         }
-        let local = a.defs.iter().find(|x| x.key == o.key).map(|x| x.kind);
-        let kind = local.or_else(|| {
+        let kind = def_kinds.get(o.key.as_str()).copied().or_else(|| {
             self.index
                 .defs_named(&o.key)
                 .find(|(f, _)| f.dialect.name == d.name)

@@ -31,11 +31,17 @@ pub struct Document {
 
 impl Document {
     /// Texts over `max_size` bytes are kept but not read or analyzed.
-    pub fn new(text: String, version: i32, dialect: Arc<Dialect>, max_size: u64) -> Self {
+    pub fn new(
+        client_uri: Uri,
+        text: String,
+        version: i32,
+        dialect: Arc<Dialect>,
+        max_size: u64,
+    ) -> Self {
         let lines = LineIndex::new(&text);
         let mut doc = Self {
             version,
-            client_uri: Uri::from_str("untitled:llsp").expect("valid URI"),
+            client_uri,
             dialect,
             tree: Tree::unparsed(String::new()),
             lines,
@@ -258,9 +264,14 @@ mod tests {
     use super::*;
     use crate::config::Layers;
 
+    fn test_uri() -> Uri {
+        Uri::from_str("file:///t.lisp").unwrap()
+    }
+
     fn doc(text: &str) -> Document {
         let d = crate::dialect::Dialects::builtin();
         Document::new(
+            test_uri(),
             text.into(),
             0,
             d.get("common-lisp").unwrap().clone(),
@@ -313,7 +324,7 @@ mod tests {
     fn oversized_is_kept_unparsed() {
         let d = crate::dialect::Dialects::builtin();
         let cl = d.get("common-lisp").unwrap().clone();
-        let mut doc = Document::new("(defun f ())".into(), 0, cl, 5);
+        let mut doc = Document::new(test_uri(), "(defun f ())".into(), 0, cl, 5);
         assert!(doc.oversized());
         assert_eq!(doc.text(), "(defun f ())");
         assert!(doc.analysis().defs.is_empty());

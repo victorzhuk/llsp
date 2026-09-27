@@ -194,6 +194,7 @@ impl Layers {
         })
     }
 
+    /// A checked-out repository is untrusted, so its file cannot redirect logging.
     pub fn load_project(&mut self, root: &Path) -> Result<()> {
         let path = root.join(PROJECT_FILE);
         self.project = if path.is_file() {
@@ -201,6 +202,9 @@ impl Layers {
         } else {
             toml::Table::new()
         };
+        if self.project.remove("log").is_some() {
+            log::warn!("{}: [log] is ignored in project files", path.display());
+        }
         Ok(())
     }
 
@@ -458,6 +462,22 @@ mod tests {
         assert_eq!(s.config.format.body_indent, 3);
         assert_eq!(s.config.workspace.max_files, 10);
         assert!(Layers::startup(Some(&path), &["novalue".into()]).is_err());
+    }
+
+    #[test]
+    fn project_file_cannot_set_log() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(PROJECT_FILE),
+            "[log]\nfile = \"/tmp/x\"\nlevel = \"trace\"\n[format]\nbody_indent = 3",
+        )
+        .unwrap();
+        let mut l = Layers::default();
+        l.load_project(dir.path()).unwrap();
+        let s = l.resolve().unwrap();
+        assert_eq!(s.config.format.body_indent, 3);
+        assert!(s.config.log.file.is_none());
+        assert_eq!(s.config.log.level, "warn");
     }
 
     #[test]
