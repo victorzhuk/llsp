@@ -3,6 +3,8 @@ name: release
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths: [.github/workflows/release.yml, install.sh]
   workflow_dispatch:
     inputs:
       tag:
@@ -35,6 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check tag matches Cargo.toml
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
@@ -88,6 +91,7 @@ jobs:
 
   publish:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
