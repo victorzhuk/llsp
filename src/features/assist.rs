@@ -277,14 +277,14 @@ impl Server {
                 let b = &doc.analysis().binders[b as usize];
                 format!("```{lang}\n{}\n```\nlocal binding", b.name)
             }
-            Sym::Global { key, qualifier } => {
+            Sym::Global { key, explicit, .. } => {
                 let same = self.same_dialect(doc);
                 let mut defs: Vec<_> = self
                     .index
                     .defs_named(&key)
                     .filter(|(f, _)| same(f))
                     .collect();
-                if let Some(q) = &qualifier
+                if let Some(q) = &explicit
                     && defs.iter().any(|(_, d)| d.namespace.as_ref() == Some(q))
                 {
                     defs.retain(|(_, d)| d.namespace.as_ref() == Some(q));

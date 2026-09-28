@@ -12,6 +12,15 @@ use crate::dialect::Dialect;
 use crate::document::path_to_uri;
 use crate::syntax::Tree;
 
+/// A global occurrence: the base-name range and the namespace it names through a
+/// qualifier or a `:refer`, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ref {
+    pub start: u32,
+    pub end: u32,
+    pub explicit: Option<String>,
+}
+
 /// What the workspace needs to know about one file without keeping its tree.
 #[derive(Debug)]
 pub struct FileSummary {
@@ -19,9 +28,10 @@ pub struct FileSummary {
     pub dialect: Arc<Dialect>,
     pub defs: Vec<Def>,
     pub namespace: Option<String>,
+    namespace_starts: Vec<(u32, String)>,
     pub lines: LineIndex,
     /// Global (non-local) occurrences by normalized name, including definition names.
-    pub refs: FxHashMap<String, Vec<(u32, u32)>>,
+    pub refs: FxHashMap<String, Vec<Ref>>,
     def_keys: FxHashMap<String, Vec<u32>>,
     /// Lowercased definition names, one per line, scanned sequentially by fuzzy search.
     search_names: String,
@@ -29,12 +39,14 @@ pub struct FileSummary {
 
 impl FileSummary {
     pub fn new(uri: Uri, dialect: Arc<Dialect>, tree: &Tree, analysis: &Analysis) -> Self {
-        let mut refs: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
+        let mut refs: FxHashMap<String, Vec<Ref>> = FxHashMap::default();
         for o in &analysis.occurrences {
             if o.target == Target::Global {
-                refs.entry(o.key.clone())
-                    .or_default()
-                    .push((o.start, o.end));
+                refs.entry(o.key.clone()).or_default().push(Ref {
+                    start: o.start,
+                    end: o.end,
+                    explicit: analysis.explicit_namespace(&dialect, o),
+                });
             }
         }
         let mut def_keys: FxHashMap<String, Vec<u32>> = FxHashMap::default();
@@ -53,6 +65,7 @@ impl FileSummary {
             dialect,
             defs: analysis.defs.clone(),
             namespace: analysis.namespace.clone(),
+            namespace_starts: analysis.namespace_starts.clone(),
             lines: LineIndex::new(tree.text()),
             refs,
             def_keys,
@@ -73,6 +86,10 @@ impl FileSummary {
             .flatten()
             .zip(&self.defs)
             .filter_map(move |(name, d)| Some((crate::features::score_lowercase(query, name)?, d)))
+    }
+
+    pub fn namespace_at(&self, offset: u32) -> Option<&str> {
+        crate::analysis::namespace_at(&self.namespace_starts, offset)
     }
 
     pub fn defs_named<'a>(&'a self, key: &str) -> impl Iterator<Item = &'a Def> + 'a {
@@ -152,10 +169,10 @@ impl Index {
     pub fn refs_named<'a>(
         &'a self,
         key: &'a str,
-    ) -> impl Iterator<Item = (&'a Arc<FileSummary>, (u32, u32))> + 'a {
+    ) -> impl Iterator<Item = (&'a Arc<FileSummary>, &'a Ref)> + 'a {
         self.files
             .values()
-            .flat_map(move |f| f.refs.get(key).into_iter().flatten().map(move |&r| (f, r)))
+            .flat_map(move |f| f.refs.get(key).into_iter().flatten().map(move |r| (f, r)))
     }
 }
 

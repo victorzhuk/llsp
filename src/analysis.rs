@@ -58,7 +58,11 @@ pub struct Analysis {
     pub binders: Vec<Binder>,
     pub occurrences: Vec<Occurrence>,
     pub namespace: Option<String>,
+    /// Offsets where a namespace form switches the current namespace, in order.
+    pub namespace_starts: Vec<(u32, String)>,
     pub aliases: FxHashMap<String, String>,
+    /// Names imported with `:refer`, by normalized name, to their namespace.
+    pub refers: FxHashMap<String, String>,
     scopes: FxHashMap<NodeId, Vec<u32>>,
     binder_nodes: FxHashMap<NodeId, u32>,
 }
@@ -110,6 +114,24 @@ impl Analysis {
     pub fn resolve_qualifier<'a>(&'a self, q: &'a str) -> &'a str {
         self.aliases.get(q).map_or(q, String::as_str)
     }
+
+    /// Namespace an occurrence names through its qualifier or a `:refer`.
+    pub fn explicit_namespace(&self, d: &Dialect, o: &Occurrence) -> Option<String> {
+        match &o.qualifier {
+            Some(q) => Some(d.normalize(self.resolve_qualifier(q)).into_owned()),
+            None => self.refers.get(&o.key).cloned(),
+        }
+    }
+
+    pub fn namespace_at(&self, offset: u32) -> Option<&str> {
+        namespace_at(&self.namespace_starts, offset)
+    }
+}
+
+/// Current namespace at `offset` given the sorted namespace switch points.
+pub fn namespace_at(starts: &[(u32, String)], offset: u32) -> Option<&str> {
+    let i = starts.partition_point(|(at, _)| *at <= offset);
+    i.checked_sub(1).map(|i| starts[i].1.as_str())
 }
 
 struct Walker<'a> {
@@ -197,6 +219,7 @@ impl Walker<'_> {
         if self.a.namespace.is_none() {
             self.a.namespace = Some(ns.clone());
         }
+        self.a.namespace_starts.push((t.node(id).start, ns.clone()));
         self.ns = Some(ns);
 
         for n in t.preorder(id) {
@@ -204,15 +227,29 @@ impl Walker<'_> {
                 continue;
             }
             let kids = t.children(n);
-            let (Some(first), Some(i)) = (
-                kids.first().and_then(|&k| t.atom(k)),
-                kids.iter()
-                    .position(|&k| matches!(t.atom(k), Some(":as" | ":as-alias"))),
-            ) else {
+            let Some(first) = kids.first().and_then(|&k| t.atom(k)) else {
                 continue;
             };
-            if let Some(alias) = kids.get(i + 1).and_then(|&k| t.atom(k)) {
-                self.a.aliases.insert(alias.to_owned(), first.to_owned());
+            for (i, &k) in kids.iter().enumerate() {
+                let next = kids.get(i + 1).copied();
+                match t.atom(k) {
+                    Some(":as" | ":as-alias") => {
+                        if let Some(alias) = next.and_then(|k| t.atom(k)) {
+                            self.a.aliases.insert(alias.to_owned(), first.to_owned());
+                        }
+                    }
+                    Some(":refer") => {
+                        let Some(names) =
+                            next.filter(|&k| t.node(k).kind == NodeKind::List(Delim::Bracket))
+                        else {
+                            continue;
+                        };
+                        for name in t.children(names).iter().filter_map(|&c| t.atom(c)) {
+                            self.a.refers.insert(self.key(name), self.key(first));
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     }

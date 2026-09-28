@@ -138,6 +138,23 @@ fn clojure_ns_and_alias() {
 }
 
 #[test]
+fn refers_and_namespace_switches() {
+    let src = "(ns a.core (:require [b.c :as c :refer [run Stop]] [d.e :refer :all]))\n(run)\n(in-ns 'x.y)\n(c/run)";
+    let (_, a) = analyze("clojure", src);
+    assert_eq!(a.refers.get("run").map(String::as_str), Some("b.c"));
+    assert_eq!(a.refers.get("Stop").map(String::as_str), Some("b.c"));
+    assert_eq!(a.refers.len(), 2);
+    assert_eq!(a.aliases.get("c").map(String::as_str), Some("b.c"));
+    assert_eq!(a.namespace_at(0), Some("a.core"));
+    assert_eq!(a.namespace_at(nth(src, "(run)", 0)), Some("a.core"));
+    assert_eq!(a.namespace_at(nth(src, "c/run", 0)), Some("x.y"));
+
+    let (_, a) = analyze("common-lisp", "(defun f ()) (in-package :app) (defun g ())");
+    assert_eq!(a.namespace_at(1), None);
+    assert_eq!(a.namespace_at(20), Some("app"));
+}
+
+#[test]
 fn shadowing() {
     let src = "(let ((x 1)) (let ((x 2)) x) x)";
     let (_, a) = analyze("common-lisp", src);
