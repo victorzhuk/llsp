@@ -1,0 +1,131 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release, e.g. v0.1.0; created on the selected commit if missing
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, zig: true, smoke: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          - { target: aarch64-apple-darwin, os: macos-latest, smoke: true }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, smoke: true }
+    env:
+      TARGET: ${{ matrix.target }}
+      ZIG: ${{ matrix.zig }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [ "$TAG" != "v$version" ]; then
+            echo "tag $TAG does not match Cargo.toml version $version"
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: matrix.zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - if: matrix.zig
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build
+        shell: bash
+        env:
+          RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
+        run: |
+          if [ "$ZIG" = true ]; then
+            cargo zigbuild --release --locked --target "$TARGET"
+          else
+            cargo build --release --locked --target "$TARGET"
+          fi
+      - name: Smoke test
+        if: matrix.smoke
+        shell: bash
+        run: '"target/$TARGET/release/llsp" --version'
+      - name: Package
+        shell: bash
+        run: |
+          name=llsp-$TARGET
+          mkdir -p dist "$name"
+          cp README.md LICENSE CHANGELOG.md "$name"/
+          if [[ "$TARGET" == *windows* ]]; then
+            cp "target/$TARGET/release/llsp.exe" "$name"/
+            7z a -tzip "dist/$name.zip" "$name" > /dev/null
+          else
+            cp "target/$TARGET/release/llsp" "$name"/
+            tar -czf "dist/$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and release notes
+        run: |
+          cp install.sh dist/
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          awk -v v="${TAG#v}" '
+            /^## \[/ { p = index($0, "[" v "]") > 0; next }
+            /^\[[^]]*\]: / { p = 0 }
+            p
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no entry for ${TAG#v}"
+            exit 1
+          fi
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$TAG" dist/*
+          --title "$TAG" --notes-file notes.md --target "$GITHUB_SHA"
+
+  verify:
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Install with the published one-liner
+        run: curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$TAG/install.sh" | LLSP_VERSION="$TAG" sh
+      - name: Check version
+        run: ~/.local/bin/llsp --version | grep -F " ${TAG#v}"

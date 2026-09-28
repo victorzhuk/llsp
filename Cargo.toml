@@ -60,3 +60,6 @@ harness = false
 [[bench]]
 name = "workspace"
 harness = false
+
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "0.1"

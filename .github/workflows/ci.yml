@@ -49,3 +49,26 @@ jobs:
         with:
           node-version: 22
       - run: npx --yes @fission-ai/openspec@1.13.2 validate --all --strict
+
+  install:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: shellcheck -s sh install.sh
+      - name: Install from a local mirror
+        run: |
+          mirror=$RUNNER_TEMP/mirror
+          mkdir -p "$mirror"
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin; do
+            mkdir -p "$mirror/llsp-$t"
+            printf '#!/bin/sh\necho "llsp 0.0.0-test"\n' > "$mirror/llsp-$t/llsp"
+            tar -czf "$mirror/llsp-$t.tar.gz" -C "$mirror" "llsp-$t"
+          done
+          (cd "$mirror" && shasum -a 256 -- *.tar.gz > SHA256SUMS)
+          LLSP_BASE_URL="file://$mirror" LLSP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/llsp" --version | grep -q 0.0.0-test

@@ -35,8 +35,21 @@ Fast, static language server for Lisp dialects, written in Rust.
 
 ## Install
 
+Linux and macOS:
+
 ```sh
-cargo install --git https://github.com/victorzhuk/llsp
+curl -fsSL https://github.com/victorzhuk/llsp/releases/latest/download/install.sh | sh
+```
+
+The script installs a prebuilt binary into `~/.local/bin` after checking its SHA-256. Linux
+binaries are static, so they run on any distribution. Set `LLSP_VERSION=v0.1.0` for a specific
+release or `LLSP_INSTALL_DIR` for another directory.
+
+Windows builds and all archives are on the [releases page](https://github.com/victorzhuk/llsp/releases).
+To build from source:
+
+```sh
+cargo install --locked --git https://github.com/victorzhuk/llsp
 ```
 
 ## Editor setup
@@ -237,6 +250,11 @@ task spec    # validate OpenSpec specs and changes
 ```
 
 Changes are specified first under [`openspec/`](openspec).
+
+To release, move the `Unreleased` notes in `CHANGELOG.md` under the new version, bump
+`version` in `Cargo.toml`, merge, then push a `vX.Y.Z` tag. The release workflow builds the
+binaries, publishes them with checksums and `install.sh`, and installs the result on Linux
+and macOS to check it.
 
 ## License
 
