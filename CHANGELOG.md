@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-28
+
+### Fixed
+- The release check fails when the installer download fails instead of passing silently.
+
 ## [0.1.0] - 2026-09-28
 
 First release.
@@ -41,5 +46,6 @@ First release.
 - The project `.llsp.toml` cannot configure logging, and log files are created readable only
   by their owner.
 
-[unreleased]: https://github.com/victorzhuk/llsp/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/victorzhuk/llsp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/victorzhuk/llsp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/victorzhuk/llsp/releases/tag/v0.1.0
