@@ -1,0 +1,45 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-09-28
+
+First release.
+
+### Added
+- Language server over stdio, or over TCP on a loopback address with
+  `llsp serve --listen`.
+- Lossless reader for Common Lisp, Clojure, Scheme, Racket, Emacs Lisp, Fennel and Janet,
+  each defined by a TOML dialect file that can be overridden or extended.
+- Syntax diagnostics and lints (`unused-binding`, `duplicate-definition`, `unresolved-call`),
+  each with its own severity, published after a configurable debounce.
+- Workspace index honoring `.gitignore` and `workspace.exclude`, updated from file watcher
+  events and open documents.
+- Document outline and fuzzy workspace symbol search.
+- Go to definition, find references and document highlights for locals and workspace names.
+- Rename for locals and workspace names. Workspace renames only touch references that
+  resolve to the renamed definition's namespace, through qualifiers, aliases and `:refer`.
+- Completion, signature help and hover.
+- Semantic highlighting, folding ranges and expand selection.
+- Indentation-only formatting of documents and ranges.
+- `llsp check`, `llsp format`, `llsp config` and `llsp dialects`, with JSON output when
+  stdout is not a terminal.
+- Layered configuration: user file, project `.llsp.toml`, environment, command line and
+  editor settings.
+- Static Linux binaries for x86_64 and aarch64, macOS and Windows builds, and an install
+  script.
+
+### Security
+- llsp never evaluates code: no reader macros, no `#.`, no subprocesses and no network access
+  besides the explicit loopback listener.
+- Documents over `files.max_file_size` are kept in sync but not analyzed.
+- The project `.llsp.toml` cannot configure logging, and log files are created readable only
+  by their owner.
+
+[unreleased]: https://github.com/victorzhuk/llsp/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/victorzhuk/llsp/releases/tag/v0.1.0
