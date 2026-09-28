@@ -1,3 +1,8 @@
+// musl's allocator serializes threads and makes the parallel workspace scan ~20x slower.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::io::{IsTerminal, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
