@@ -130,6 +130,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: Install with the published one-liner
+        shell: bash
         run: curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$TAG/install.sh" | LLSP_VERSION="$TAG" sh
       - name: Check version
         run: ~/.local/bin/llsp --version | grep -F " ${TAG#v}"
