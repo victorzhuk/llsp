@@ -1,45 +1,6 @@
-# navigation Specification
+# Spec Delta
 
-## Purpose
-Let editors navigate Lisp code statically: symbols, definitions, references, highlights and
-rename, for local bindings and workspace-wide names.
-
-## Requirements
-
-### Requirement: Document symbols
-The server SHALL return the document's definitions as hierarchical symbols: kind from the
-definition kind, range of the whole form, selection range of the name, detail from the first
-signature; definitions nested inside another definition's form are its children.
-
-#### Scenario: Outline
-- **WHEN** a document defines `(defun a ())` and `(defclass b () ())`
-- **THEN** document symbols are `a` (function) and `b` (class)
-
-### Requirement: Workspace symbols
-The server SHALL return indexed definitions whose names match the query as a case-insensitive
-subsequence, best matches first (exact, prefix, substring, subsequence, then shorter names),
-at most `workspace.max_symbols`.
-
-#### Scenario: Fuzzy query
-- **WHEN** the workspace defines `make-point`, `point-x` and `mapcar-safe` and the query is `mkp`
-- **THEN** the result contains `make-point` only
-
-### Requirement: Definition
-Go-to-definition SHALL resolve a local symbol to its binder and a global symbol to indexed
-definitions with the same normalized name in files of the same dialect, preferring the current
-file and, for qualified symbols, definitions in the qualifier's namespace (after aliases).
-
-#### Scenario: Local
-- **WHEN** definition is requested on `x` in the body of `(let ((x 1)) x)`
-- **THEN** the result is the binder `x`
-
-#### Scenario: Cross-file
-- **WHEN** `b.lisp` calls `(helper)` and `a.lisp` defines `helper`
-- **THEN** definition on the call returns the name range in `a.lisp`
-
-#### Scenario: Other dialect ignored
-- **WHEN** `a.clj` defines `helper` and `b.lisp` calls `(helper)`
-- **THEN** definition returns nothing
+## MODIFIED Requirements
 
 ### Requirement: References and highlights
 References SHALL return every occurrence resolving to the same binder (local) or to the same

@@ -20,8 +20,31 @@ pub(crate) enum Sym {
     Local(u32),
     Global {
         key: String,
-        qualifier: Option<String>,
+        /// Namespace named by a qualifier or `:refer`.
+        explicit: Option<String>,
+        /// Namespace current at the occurrence.
+        context: Option<String>,
     },
+}
+
+/// Namespace a global reference resolves to, given the namespaces that define its name:
+/// the explicit one, else the current one if it defines the name, else the only one.
+/// `None` when that is ambiguous.
+pub(crate) fn owner<'a>(
+    defined: &[Option<&'a str>],
+    explicit: Option<&'a str>,
+    context: Option<&'a str>,
+) -> Option<Option<&'a str>> {
+    if explicit.is_some() {
+        return Some(explicit);
+    }
+    if defined.contains(&context) {
+        return Some(context);
+    }
+    match defined {
+        [only] => Some(*only),
+        _ => None,
+    }
 }
 
 impl Server {
@@ -43,10 +66,8 @@ impl Server {
             Target::Local(b) => Sym::Local(b),
             Target::Global => Sym::Global {
                 key: occ.key.clone(),
-                qualifier: occ
-                    .qualifier
-                    .as_deref()
-                    .map(|q| doc.dialect.normalize(a.resolve_qualifier(q)).into_owned()),
+                explicit: a.explicit_namespace(&doc.dialect, occ),
+                context: a.namespace_at(occ.start).map(str::to_owned),
             },
         };
         Some((sym, occ))
@@ -74,6 +95,24 @@ impl Server {
                 ),
             ),
         }
+    }
+
+    /// Distinct namespaces with a definition of `key` in files of `doc`'s dialect.
+    pub(crate) fn defined_namespaces<'a>(
+        &'a self,
+        doc: &'a Document,
+        key: &'a str,
+    ) -> Vec<Option<&'a str>> {
+        let same = self.same_dialect(doc);
+        let mut v: Vec<Option<&str>> = self
+            .index
+            .defs_named(key)
+            .filter(|(f, _)| same(f))
+            .map(|(_, d)| d.namespace.as_deref())
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
     }
 
     /// Indexed files that share the dialect of `doc`.

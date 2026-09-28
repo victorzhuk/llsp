@@ -6,11 +6,12 @@ use lsp_types::{
     TextDocumentPositionParams, TextEdit, Uri, WorkspaceEdit,
 };
 
-use super::Sym;
+use super::{Sym, owner};
 use crate::analysis::{Target, symbol_like};
 use crate::document::Document;
 use crate::server::{HandlerResult, ResponseError, Server};
 use crate::syntax::{NodeKind, Tree};
+use crate::workspace::{FileSummary, Ref};
 
 impl Server {
     pub(crate) fn definition(
@@ -32,8 +33,8 @@ impl Server {
                     doc.range(b.start, b.end, self.enc),
                 )]
             }
-            Sym::Global { key, qualifier } => {
-                self.global_definitions(&uri, doc, &key, qualifier.as_deref())
+            Sym::Global { key, explicit, .. } => {
+                self.global_definitions(&uri, doc, &key, explicit.as_deref())
             }
         };
         Ok((!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations)))
@@ -83,8 +84,14 @@ impl Server {
                     .map(|(s, e)| Location::new(doc.client_uri.clone(), doc.range(s, e, self.enc)))
                     .collect()
             }
-            Sym::Global { key, .. } => {
+            Sym::Global {
+                key,
+                explicit,
+                context,
+            } => {
                 let same = self.same_dialect(doc);
+                let defined = self.defined_namespaces(doc, &key);
+                let target = owner(&defined, explicit.as_deref(), context.as_deref());
                 let mut files: Vec<_> = self
                     .index
                     .files()
@@ -104,8 +111,11 @@ impl Server {
                     out.extend(
                         f.refs[&key]
                             .iter()
-                            .filter(|(s, _)| !decls.iter().any(|&(ds, de)| ds <= *s && *s < de))
-                            .map(|&(s, e)| loc(s, e)),
+                            .filter(|r| target.is_none() || resolves_to(&defined, f, r) == target)
+                            .filter(|r| {
+                                !decls.iter().any(|&(ds, de)| ds <= r.start && r.start < de)
+                            })
+                            .map(|r| loc(r.start, r.end)),
                     );
                 }
                 out
@@ -167,13 +177,14 @@ impl Server {
         let Some((sym, occ)) = self.symbol_at(doc, p.position) else {
             return Ok(None);
         };
-        if let Sym::Global { key, .. } = &sym {
-            let same = self.same_dialect(doc);
-            if !self.index.defs_named(key).any(|(f, _)| same(f)) {
-                return Err(ResponseError::request_failed(format!(
-                    "cannot rename {key}: no definition in the workspace"
-                )));
-            }
+        if let Sym::Global {
+            key,
+            explicit,
+            context,
+        } = &sym
+        {
+            let defined = self.defined_namespaces(doc, key);
+            rename_target(&defined, key, explicit.as_deref(), context.as_deref())?;
         }
         let text = &doc.text()[occ.start as usize..occ.end as usize];
         Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
@@ -206,15 +217,21 @@ impl Server {
                     .collect();
                 changes.insert(doc.client_uri.clone(), edits);
             }
-            Sym::Global { key, .. } => {
+            Sym::Global {
+                key,
+                explicit,
+                context,
+            } => {
                 let same = self.same_dialect(doc);
-                if !self.index.defs_named(&key).any(|(f, _)| same(f)) {
-                    return Err(ResponseError::request_failed(format!(
-                        "cannot rename {key}: no definition in the workspace"
-                    )));
-                }
-                for (f, (s, e)) in self.index.refs_named(&key).filter(|(f, _)| same(f)) {
-                    let loc = self.location(f, s, e);
+                let defined = self.defined_namespaces(doc, &key);
+                let target =
+                    rename_target(&defined, &key, explicit.as_deref(), context.as_deref())?;
+                let refs = self
+                    .index
+                    .refs_named(&key)
+                    .filter(|&(f, r)| same(f) && resolves_to(&defined, f, r) == Some(target));
+                for (f, r) in refs {
+                    let loc = self.location(f, r.start, r.end);
                     changes
                         .entry(loc.uri)
                         .or_default()
@@ -223,6 +240,33 @@ impl Server {
             }
         }
         Ok(Some(WorkspaceEdit::new(changes)))
+    }
+}
+
+fn resolves_to<'a>(
+    defined: &[Option<&'a str>],
+    file: &'a FileSummary,
+    r: &'a Ref,
+) -> Option<Option<&'a str>> {
+    owner(defined, r.explicit.as_deref(), file.namespace_at(r.start))
+}
+
+/// The namespace whose definition a rename changes; an error when there is none or it is
+/// ambiguous.
+fn rename_target<'a>(
+    defined: &[Option<&'a str>],
+    key: &str,
+    explicit: Option<&'a str>,
+    context: Option<&'a str>,
+) -> HandlerResult<Option<&'a str>> {
+    match owner(defined, explicit, context) {
+        Some(ns) if defined.contains(&ns) => Ok(ns),
+        _ if defined.is_empty() || explicit.is_some() => Err(ResponseError::request_failed(
+            format!("cannot rename {key}: no definition in the workspace"),
+        )),
+        _ => Err(ResponseError::request_failed(format!(
+            "cannot rename {key}: defined in several namespaces; qualify it or rename from its definition"
+        ))),
     }
 }
 
