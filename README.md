@@ -2,59 +2,42 @@
 
 Fast, static language server for Lisp dialects, written in Rust.
 
-- **Dialects:** Common Lisp, Clojure (clj/cljs/cljc/edn), Scheme (R7RS, Guile, Chicken),
-  Racket, Emacs Lisp, Fennel and Janet. Each is a TOML data file, so you can extend or override
-  it, or add a new dialect with `extends`.
-- **Static:** llsp never evaluates your code. It runs no reader macros, no `#.`, no build tools
-  and no subprocesses, and opens no network connections.
-- **Configurable:** every setting can come from a file, an environment variable, the command
-  line or the editor.
+Supports Common Lisp, Clojure (clj/cljs/cljc/edn), Scheme (R7RS, Guile, Chicken), Racket,
+Emacs Lisp, Fennel and Janet. Each dialect is a TOML file in [`dialects/`](dialects) that you
+can override, extend, or build on with `extends`.
+
+llsp never evaluates your code: no reader macros, build tools, subprocesses or network access.
+
+Indexing 1000 files with 50k definitions takes about 143 ms cold; definition and hover answer
+in about 70 µs (`task bench`, shared cloud VM).
 
 ## Features
 
-- Diagnostics:
-  - syntax errors: unbalanced, mismatched or unexpected delimiters, unterminated strings and
-    comments
-  - lints, each with its own severity: `unused-binding`, `duplicate-definition`, and
-    `unresolved-call` (off by default)
-  - the same diagnostics are available from `llsp check`
-- Document outline and fuzzy workspace symbol search
-- Go to definition, find references, document highlights, for locals (with shadowing) and
-  workspace names (namespaces and aliases taken into account)
-- Rename, both local and across the workspace, limited to the namespace the name resolves to
-  (qualifiers, aliases and `:refer` included), with validation of the new name
-- Completion: visible locals, workspace definitions, dialect special forms and builtins, with
-  fuzzy ranking; `ns/`, `pkg:` and alias prefixes narrow to that namespace
-- Signature help that picks the matching arity and understands lambda-list markers
-  (`&optional`, `&rest`, `&`)
-- Hover with signature, kind, namespace, docstring and location
-- Semantic highlighting: definitions, parameters, locals, macros, special forms, builtins,
-  keywords, namespaces, regexes, and datum comments shown as comments
-- Folding ranges and expand selection
-- Formatting (document and range) that only re-indents; see [Formatting](#formatting)
+- Diagnostics: syntax errors plus `unused-binding`, `duplicate-definition` and
+  `unresolved-call` lints (also via `llsp check`)
+- Go to definition, references, highlights, rename, with namespaces and aliases resolved
+- Completion, signature help, hover
+- Document outline, workspace symbols, semantic highlighting
+- Folding ranges, expand selection
+- Formatting that only re-indents
 
 ## Install
-
-Linux and macOS:
 
 ```sh
 curl -fsSL https://github.com/victorzhuk/llsp/releases/latest/download/install.sh | sh
 ```
 
-The script installs a prebuilt binary into `~/.local/bin` after checking its SHA-256. Linux
-binaries are static, so they run on any distribution. Set `LLSP_VERSION=v0.1.0` for a specific
-release or `LLSP_INSTALL_DIR` for another directory.
-
-Windows builds and all archives are on the [releases page](https://github.com/victorzhuk/llsp/releases).
-To build from source:
+Installs a checksum-verified binary into `~/.local/bin` on Linux and macOS. Set
+`LLSP_VERSION` or `LLSP_INSTALL_DIR` to change the release or directory. Other builds are on
+the [releases page](https://github.com/victorzhuk/llsp/releases), or build from source:
 
 ```sh
 cargo install --locked --git https://github.com/victorzhuk/llsp
 ```
 
-## Editor setup
+## Usage
 
-Start `llsp` with no arguments. It speaks LSP over stdio. For example, in Neovim:
+`llsp` with no arguments speaks LSP over stdio. Neovim:
 
 ```lua
 vim.lsp.config('llsp', {
@@ -65,196 +48,76 @@ vim.lsp.config('llsp', {
 vim.lsp.enable('llsp')
 ```
 
-`llsp serve --listen 127.0.0.1:9257` serves a single client over TCP. Only loopback addresses
-are accepted.
-
-## Command line
-
 ```
 llsp [--config PATH] [--set KEY=VALUE]... [--log-level LEVEL] [--log-file PATH] [COMMAND]
 
-  serve      serve LSP (default)
-  check      report diagnostics for files or directories; exit 1 on errors, 2 on I/O errors
-  format     re-indent files in place; --check lists files that would change and exits 1
+  serve      serve LSP (default); --listen 127.0.0.1:PORT for loopback TCP
+  check      report diagnostics; exit 1 on errors, 2 on I/O errors
+  format     re-indent files in place; --check exits 1 if anything would change
   config     print the effective configuration
   dialects   list dialects and their file extensions
 ```
 
-`check`, `format`, `config` and `dialects` accept `--format text|json`. When `--format` isn't given, the
-output is text on a terminal and JSON otherwise, so both scripts and CI can parse it.
+`check`, `format`, `config` and `dialects` accept `--format text|json`. By default the output
+is text on a terminal and JSON otherwise.
 
 ## Configuration
 
-Sources are merged in this order, with later sources winning. Tables merge key by key; any
-other value is replaced.
+Later sources win: built-in defaults → `$XDG_CONFIG_HOME/llsp/config.toml` (or `--config`,
+`LLSP_CONFIG`) → `.llsp.toml` in the workspace root → `LLSP_<SECTION>__<KEY>` env vars →
+`--set` → editor `initializationOptions` → `workspace/didChangeConfiguration`.
 
-1. Built-in defaults (`llsp config` prints the effective result)
-2. User file: `$XDG_CONFIG_HOME/llsp/config.toml`, or `--config PATH` / `LLSP_CONFIG`
-3. Project file: `.llsp.toml` in the workspace root
-4. Environment: `LLSP_<SECTION>__<KEY>=value`, for example `LLSP_FORMAT__BODY_INDENT=4`.
-   Values are parsed as TOML literals and fall back to strings.
-5. Command line: `--set format.body_indent=4`
-6. `initializationOptions` sent by the editor
-7. `workspace/didChangeConfiguration` settings, either as the whole object or under an
-   `llsp` key
-
-The project file is part of the repository, so its `[log]` section is ignored.
-
-Unknown keys are rejected. At startup the server exits with an error. When the editor sends
-a bad setting, llsp shows a warning and keeps the previous configuration.
+`llsp config` prints the effective settings. Unknown keys are rejected. Lint severities are
+`off`, `hint`, `info`, `warning` or `error`.
 
 ```toml
-[files]
-default_dialect = "common-lisp"   # used when nothing else matches
-max_file_size = 8388608           # larger files are not analyzed
-
-[files.associations]              # glob -> dialect; checked first
-"*.lsp" = "emacs-lisp"
-
-[workspace]
-index = true
-exclude = ["**/node_modules/**", "**/target/**"]
-max_files = 20000
-max_symbols = 256                 # workspace/symbol result cap
-
-[completion]
-max_items = 200
-builtins = true                   # offer dialect special forms and builtins
-
 [diagnostics]
-enable = true
-debounce_ms = 100
-unused_binding = "hint"           # off | hint | info | warning | error
-duplicate_definition = "warning"
-unresolved_call = "off"           # calls to names defined nowhere in the workspace
-ignore_prefix = "_"               # bindings starting with this are never "unused"
-known_symbols = []                # extra names unresolved-call accepts
+unresolved_call = "warning"       # off by default
 
 [format]
 body_indent = 2
-distinguished_indent = 4
-trim_trailing_whitespace = true
 
-[log]
-level = "warn"                    # or --log-level / LLSP_LOG
-# file = "/path/to/llsp.log"      # created with mode 0600
+[dialects.common-lisp.indent]
+my-with-macro = 1
 
-# Extend a built-in dialect:
-[dialects.clojure.defs]
-defroute = { kind = "function", params = "vector" }
-
-# Add a dialect:
 [dialects.lfe]
 extends = "common-lisp"
 extensions = ["lfe"]
-case_sensitive = true
 ```
 
-### Formatting
+Dialect keys include `extends`, `extensions`, `language_ids`, `case_sensitive`, `reader`,
+`defs`, `bindings`, `indent`, `indent_prefixes`, `special_forms` and `builtins`; see
+[`dialects/`](dialects) for complete definitions.
 
-The formatter only changes indentation. It re-indents lines and trims trailing whitespace,
-and never moves code between lines. Lines that start inside a string or block comment are
-left alone. Each line is indented according to the innermost list that encloses it:
+The dialect of a file comes from the first match of: `files.associations` (glob → dialect),
+the editor's `languageId`, a `#lang` line or `-*- mode: X -*-` modeline, the file extension,
+`files.default_dialect`.
 
-- **`[...]` and `{...}`:** one column past the opener.
-- **Head with an indent spec N:** the first N arguments get `distinguished_indent`; the rest
-  get `body_indent`. The spec comes from, in order:
-  - an indent declared in code: `(declare (indent N))`, or `:style/indent N` in Clojure
-  - the dialect's `indent` table
-  - the longest matching `indent_prefixes` entry
-- **Any other call:**
-  - if the first argument is on the same line as the head, later arguments align with it
-  - otherwise they go one column past the opener
+## Security
 
-```toml
-[dialects.common-lisp.indent]
-my-with-macro = 1
-```
-
-### Dialect detection
-
-For each file, llsp takes the first of these that matches:
-
-1. `files.associations`
-2. The editor's `languageId`
-3. A `#lang` line or `-*- mode: X -*-` modeline on the first line
-4. The file extension
-5. `files.default_dialect`
-
-The built-in dialect definitions live in [`dialects/`](dialects). A dialect definition covers:
-
-- **Reader rules:** brackets, comments, character literals, prefixes and how many forms each
-  prefix takes
-- **Definition forms:** where the name and parameters are
-- **Binding forms**
-- **Indentation specs**
-- **Special forms and builtins**
-
-## Security model
-
-llsp reads untrusted code, so it is built to be safe with it:
-
-- **Never executes code:** no evaluation, compilation, macro expansion, reader macros (`#.`,
-  `#=`), build tools or subprocesses. Everything comes from syntax and the dialect data.
-- **No network:** the only socket is the LSP listener you ask for with `--listen`, and it
-  must be a loopback address.
-- **Stays in the workspace:** indexing walks the workspace roots without following symlinks.
-  Watched-file events for paths outside the roots are ignored.
-- **Bounded resources:**
-  - files over `files.max_file_size` are not indexed; open documents over it are kept but
-    not analyzed, and you get a warning
-  - `workspace.max_files` caps indexing
-  - the reader is iterative, so deep nesting cannot overflow the stack
-  - syntax errors are capped at 100 per file
-- **Private logs:** logs never contain document text. Log files are created with mode 0600.
-- **Tested for robustness:** property tests feed random text in every dialect and call every
-  request at random positions over the real protocol.
-
-`.llsp.toml` comes from the repository you open. It can change llsp's behavior and limits,
-but it cannot make llsp run anything.
-
-## Performance
-
-Measured with `task bench` (criterion, release build) on a shared cloud VM, so treat the
-numbers as rough.
-
-| Benchmark | Result |
-|---|---|
-| Parse 1 MB (per dialect) | 47–138 MB/s |
-| Format 1 MB (per dialect) | 54–82 MB/s |
-| Cold index, 1000 files / 50k definitions | 143 ms |
-
-Request round-trips over the protocol, on a workspace with 50,001 definitions:
-
-| Request | Latency |
-|---|---|
-| definition, hover | ~70 µs |
-| references (name with a few uses) | ~68 µs |
-| completion | 1.1 ms |
-| workspace symbol | 2.2 ms |
-| semantic tokens (50-definition file) | 2.3 ms |
-| formatting (50-definition file) | 2.8 ms |
-| references (name with 50,001 uses) | 150 ms |
-
-The last row is dominated by building the JSON response, not by the lookup.
+- No evaluation, macro expansion, reader macros (`#.`, `#=`), build tools or subprocesses.
+- No network except the loopback-only `--listen` socket. Indexing stays inside the workspace
+  roots and doesn't follow symlinks. File size, file count and syntax errors per file are
+  capped.
+- `.llsp.toml` comes from the repository you open. It can change behavior and limits, but it
+  cannot make llsp run anything, and its `[log]` section is ignored.
+- Logs never contain document text; log files are created with mode 0600.
 
 ## Development
 
 ```sh
-task build   # release binary in target/release/llsp
-task test    # tests (5 min timeout, 4 threads)
-task ci      # lint, tests, bench build, spec validation
+task build   # release binary
+task test    # tests
 task lint    # rustfmt + clippy
 task bench   # criterion benchmarks
-task spec    # validate OpenSpec specs and changes
+task ci      # everything CI runs
 ```
 
 Changes are specified first under [`openspec/`](openspec).
 
 To release, move the `Unreleased` notes in `CHANGELOG.md` under the new version, bump
-`version` in `Cargo.toml`, merge, then push a `vX.Y.Z` tag. The release workflow builds the
-binaries, publishes them with checksums and `install.sh`, and installs the result on Linux
-and macOS to check it.
+`version` in `Cargo.toml`, merge, then push a `vX.Y.Z` tag. The release workflow builds and
+publishes the binaries with checksums and `install.sh`.
 
 ## License
 
