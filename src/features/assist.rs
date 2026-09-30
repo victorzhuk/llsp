@@ -362,7 +362,11 @@ pub(crate) fn completion_cell(tree: &Tree, d: &Dialect, a: &Analysis, offset: u3
             match before {
                 0 if !gap_value_cell(tree, d, id) => Cell::Function,
                 1 if tree.head(id).is_some_and(|h| d.normalize(h) == "function") => Cell::Function,
-                _ => Cell::Value,
+                _ => tree
+                    .head(id)
+                    .and_then(|h| d.def_spec(&d.normalize(h)))
+                    .filter(|s| s.name == before)
+                    .map_or(Cell::Value, |s| s.cell),
             }
         }
         _ => Cell::Value,
@@ -525,6 +529,15 @@ mod tests {
         assert_eq!(cell("lispico-cl", "#(noise 1)", 4), Cell::Value);
         assert_eq!(cell("lispico-cl", "(cond () 1)", 7), Cell::Value);
         assert_eq!(cell("lispico-cl", "#() 1", 2), Cell::Value);
+    }
+
+    #[test]
+    fn definition_name_positions_use_declared_cell() {
+        assert_eq!(cell("lispico-cl", "(defun  ())", 7), Cell::Function);
+        assert_eq!(cell("lispico-cl", "(defn  [])", 6), Cell::Function);
+        assert_eq!(cell("lispico-cl", "(defmacro  ())", 10), Cell::Function);
+        assert_eq!(cell("lispico-cl", "(def  1)", 5), Cell::Value);
+        assert_eq!(cell("lispico-cl", "(defun noise (x) 1)", 16), Cell::Value);
     }
 
     #[test]
