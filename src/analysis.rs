@@ -699,11 +699,11 @@ impl Walker<'_> {
         match t.node(p).kind {
             NodeKind::Prefix => t.prefix_text(p) == "#'" && t.children(p) == [id],
             NodeKind::List(Delim::Paren) => {
-                if t.child(p, 0) != Some(id) {
-                    let head = t.head(p).map(|h| self.key(h));
-                    return t.child(p, 1) == Some(id) && head.as_deref() == Some("function");
+                if t.child(p, 1) == Some(id) {
+                    t.head(p).is_some_and(|h| self.d.normalize(h) == "function")
+                } else {
+                    t.child(p, 0) == Some(id) && !(self.cond_clause(p) || self.reader_vector(p))
                 }
-                !(self.cond_clause(p) || self.reader_vector(p))
             }
             _ => false,
         }

@@ -25,7 +25,9 @@ struct Lexer<'a> {
 
 impl Lexer<'_> {
     fn run(&mut self) {
-        if self.src.starts_with(b"#!/") || self.src.starts_with(b"#! ") {
+        if self.class(b'#') & INVALID == 0
+            && (self.src.starts_with(b"#!/") || self.src.starts_with(b"#! "))
+        {
             let end = self.line_end(0);
             self.push(TokenKind::LineComment, 0, end);
         }

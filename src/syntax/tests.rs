@@ -183,6 +183,28 @@ fn shebang_is_comment() {
     );
 }
 
+#[test]
+fn shebang_yields_to_invalid_opener() {
+    let d = load_dialect(
+        r##"[lx]
+extends = "clojure"
+[lx.reader]
+invalid = ["#"]"##,
+    );
+    let t = parse_with(&d, "#!/bin/tool\n(ok)");
+    let first = &t.tokens()[0];
+    assert_eq!(first.kind, TokenKind::Atom);
+    assert_eq!(t.token_text(first), "#");
+    assert_eq!(
+        t.errors(),
+        [SyntaxError {
+            kind: ErrorKind::InvalidSyntax,
+            start: 0,
+            end: 1
+        }]
+    );
+}
+
 fn load_dialect(src: &str) -> crate::dialect::Dialect {
     let overrides: toml::Table = toml::from_str(src).unwrap();
     let d = Dialects::load(&overrides).unwrap();

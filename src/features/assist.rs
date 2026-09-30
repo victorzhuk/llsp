@@ -7,11 +7,11 @@ use lsp_types::{
 use rustc_hash::FxHashSet;
 
 use super::{Sym, symbols::fuzzy_score};
-use crate::analysis::{Def, Signature};
+use crate::analysis::{Analysis, Def, Signature};
 use crate::dialect::{Cell, Dialect, SymbolKind};
 use crate::document::Document;
 use crate::server::{HandlerResult, Server};
-use crate::syntax::{Delim, NodeId, NodeKind};
+use crate::syntax::{Delim, NodeId, NodeKind, Tree};
 use crate::workspace::FileSummary;
 
 struct Candidate {
@@ -49,17 +49,7 @@ impl Server {
         let query = base.to_lowercase();
         let a = doc.analysis();
         let same = self.same_dialect(doc);
-        let fn_cells = doc.dialect.function_cells;
-        let at_call_head = tree.atom_at(offset).is_some_and(|atom| {
-            tree.parent(atom).is_some_and(|p| {
-                tree.node(p).kind == NodeKind::List(Delim::Paren) && tree.child(p, 0) == Some(atom)
-            })
-        });
-        let want_cell = if fn_cells && at_call_head {
-            Cell::Function
-        } else {
-            Cell::Value
-        };
+        let want_cell = completion_cell(tree, &doc.dialect, a, offset);
         let cfg = &self.settings.config.completion;
 
         let mut out: Vec<Candidate> = Vec::new();
@@ -68,11 +58,10 @@ impl Server {
             Some(q) => {
                 let ns = doc.dialect.normalize(a.resolve_qualifier(q)).into_owned();
                 for f in self.index.files().filter(|f| same(f)) {
-                    for d in f
-                        .defs
-                        .iter()
-                        .filter(|d| d.namespace.as_deref() == Some(&ns))
-                    {
+                    for d in f.defs.iter().filter(|d| {
+                        d.namespace.as_deref() == Some(&ns)
+                            && doc.dialect.cells_match(d.cell, want_cell)
+                    }) {
                         if let Some(score) = fuzzy_score(&query, &d.name) {
                             push(def_candidate(d, score));
                         }
@@ -80,7 +69,7 @@ impl Server {
                 }
             }
             None => {
-                if !fn_cells || !at_call_head {
+                if want_cell == Cell::Value {
                     for b in a.visible_binders(offset) {
                         if let Some(score) = fuzzy_score(&query, &b.name)
                             && !(b.start <= offset && offset <= b.end)
@@ -344,6 +333,55 @@ impl Server {
     }
 }
 
+/// Requested cell for completion at `offset`: the analysis occurrence's cell for an
+/// existing atom, otherwise the cell an atom completed at `offset` would get.
+pub(crate) fn completion_cell(tree: &Tree, d: &Dialect, a: &Analysis, offset: u32) -> Cell {
+    if !d.function_cells {
+        return Cell::Value;
+    }
+    if let Some(atom) = tree.atom_at(offset)
+        && let Some(o) = a.occurrences.iter().find(|o| o.node == atom)
+    {
+        return o.cell;
+    }
+    let id = tree.node_at(offset);
+    match tree.node(id).kind {
+        NodeKind::Prefix => {
+            if tree.prefix_text(id) == "#'" {
+                Cell::Function
+            } else {
+                Cell::Value
+            }
+        }
+        NodeKind::List(Delim::Paren) => {
+            let before = tree
+                .children(id)
+                .iter()
+                .filter(|&&c| tree.node(c).end <= offset)
+                .count();
+            match before {
+                0 if !gap_value_cell(tree, d, id) => Cell::Function,
+                1 if tree.head(id).is_some_and(|h| d.normalize(h) == "function") => Cell::Function,
+                _ => Cell::Value,
+            }
+        }
+        _ => Cell::Value,
+    }
+}
+
+/// True when a new head of the list `id` would sit in a value position: inside a
+/// `cond` clause test or a reader vector's data.
+fn gap_value_cell(tree: &Tree, d: &Dialect, id: NodeId) -> bool {
+    let Some(gp) = tree.parent(id) else {
+        return false;
+    };
+    match tree.node(gp).kind {
+        NodeKind::Prefix => tree.prefix_text(gp) == "#",
+        NodeKind::List(Delim::Paren) => tree.head(gp).is_some_and(|h| d.normalize(h) == "cond"),
+        _ => false,
+    }
+}
+
 fn def_candidate(d: &Def, score: u8) -> Candidate {
     Candidate {
         label: d.name.clone(),
@@ -455,4 +493,45 @@ fn enclosing_call(doc: &Document, offset: u32) -> Option<(NodeId, NodeId)> {
         return Some((id, head));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::completion_cell;
+    use crate::analysis::Analysis;
+    use crate::dialect::Cell;
+    use crate::dialect::Dialects;
+    use crate::syntax::Tree;
+
+    fn cell(dialect: &str, src: &str, offset: u32) -> Cell {
+        let ds = Dialects::builtin();
+        let d = ds.get(dialect).unwrap();
+        let t = Tree::parse(src.to_owned(), d);
+        let a = Analysis::new(&t, d);
+        completion_cell(&t, d, &a, offset)
+    }
+
+    #[test]
+    fn function_reference_positions_are_function() {
+        assert_eq!(cell("lispico-cl", "(function noise)", 12), Cell::Function);
+        assert_eq!(cell("lispico-cl", "#'noise", 5), Cell::Function);
+        assert_eq!(cell("lispico-cl", "#'", 2), Cell::Function);
+        assert_eq!(cell("lispico-cl", "(function )", 10), Cell::Function);
+    }
+
+    #[test]
+    fn cond_tests_and_reader_vectors_are_value() {
+        assert_eq!(cell("lispico-cl", "(cond (noise 1))", 9), Cell::Value);
+        assert_eq!(cell("lispico-cl", "#(noise 1)", 4), Cell::Value);
+        assert_eq!(cell("lispico-cl", "(cond () 1)", 7), Cell::Value);
+        assert_eq!(cell("lispico-cl", "#() 1", 2), Cell::Value);
+    }
+
+    #[test]
+    fn heads_and_plain_positions_keep_cells() {
+        assert_eq!(cell("lispico-cl", "(noise 1)", 3), Cell::Function);
+        assert_eq!(cell("lispico-cl", "(noise )", 7), Cell::Value);
+        assert_eq!(cell("lispico-cl", "(noise 1)", 7), Cell::Value);
+        assert_eq!(cell("common-lisp", "(noise 1)", 3), Cell::Value);
+    }
 }
