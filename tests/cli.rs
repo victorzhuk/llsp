@@ -132,8 +132,25 @@ fn dialects_listed() {
         "emacs-lisp",
         "fennel",
         "janet",
+        "lispico-clojure",
+        "lispico-cl",
     ] {
         assert!(names.iter().any(|x| x == n), "{n}");
+    }
+    let exts: Vec<_> = json(&out)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["name"].as_str().unwrap().to_owned(),
+                d["extensions"].clone(),
+            )
+        })
+        .collect();
+    for (n, ext) in &exts {
+        let empty = ext.as_array().unwrap().is_empty();
+        assert_eq!(empty, n.starts_with("lispico-"), "{n} extensions");
     }
 }
 

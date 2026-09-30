@@ -1,0 +1,58 @@
+# go-lispico 12e0990
+language_ids = ["lispico-clojure"]
+case_sensitive = true
+namespace_separators = ["/"]
+keyword_prefixes = [":"]
+def_prefixes = []
+data_forms = ["quote"]
+special_forms = [
+  "def", "defn", "defmacro", "fn", "if", "cond", "when", "let", "let*", "do",
+  "quote", "quasiquote", "set!", "loop", "recur", "try", "catch", "throw",
+  "and", "or", "not",
+]
+builtins = [
+  "+", "-", "*", "/", "abs", "ceil", "floor", "max", "min", "mod", "neg?",
+  "pos?", "pow", "quot", "sqrt", "zero?",
+  "<", "<=", "=", ">=", ">",
+  "format", "str", "string->float", "string->int", "string/contains?",
+  "string/ends-with?", "string/join", "string/length", "string/lines",
+  "string/lower", "string/replace", "string/split", "string/starts-with?",
+  "string/trim", "string/upper",
+  "assoc", "concat", "conj", "cons", "contains?", "count", "dissoc", "empty?",
+  "first", "get", "get-in", "hash-map", "keys", "last", "list", "merge", "nth",
+  "range", "rest", "reverse", "sort", "vals", "vector",
+  "apply", "filter", "map", "reduce",
+  "assert",
+  "bool?", "float->int", "float?", "fn?", "int->float", "int?",
+  "keyword->str", "keyword?", "list?", "macro?", "map?", "nil?",
+  "str->keyword", "string?", "symbol?", "type", "vector?",
+  "->", "->>", "as->", "if-let", "when-let",
+]
+
+[reader]
+brackets = ["()", "[]", "{}"]
+line_comment = ";"
+comma_whitespace = true
+terminators = "`@"
+sharp_dispatch = false
+invalid = ["#"]
+
+[reader.prefixes]
+"'" = 1
+"`" = 1
+"~" = 1
+"~@" = 1
+"@" = 1
+
+[defs]
+def = { kind = "variable" }
+defn = { kind = "function", params = "vector", cell = "function" }
+defmacro = { kind = "macro", params = "vector", cell = "function" }
+
+[bindings]
+let = "let-vector"
+"let*" = "let-vector"
+loop = "let-vector"
+if-let = "let-vector"
+when-let = "let-vector"
+fn = "fn"

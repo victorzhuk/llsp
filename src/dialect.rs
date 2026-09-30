@@ -15,6 +15,11 @@ const BUILTIN: &[(&str, &str)] = &[
     ("emacs-lisp", include_str!("../dialects/emacs-lisp.toml")),
     ("fennel", include_str!("../dialects/fennel.toml")),
     ("janet", include_str!("../dialects/janet.toml")),
+    (
+        "lispico-clojure",
+        include_str!("../dialects/lispico-clojure.toml"),
+    ),
+    ("lispico-cl", include_str!("../dialects/lispico-cl.toml")),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -501,9 +506,12 @@ mod tests {
             "emacs-lisp",
             "fennel",
             "janet",
+            "lispico-clojure",
+            "lispico-cl",
         ] {
             let dialect = d.get(name).unwrap_or_else(|| panic!("{name}"));
-            assert!(!dialect.extensions.is_empty(), "{name} has extensions");
+            let lispico = name.starts_with("lispico-");
+            assert_eq!(dialect.extensions.is_empty(), lispico, "{name} extensions");
         }
     }
 
