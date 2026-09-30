@@ -22,6 +22,7 @@ pub struct Def {
     pub doc: Option<String>,
     pub namespace: Option<String>,
     pub indent: Option<u32>,
+    pub cell: Cell,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,7 @@ pub struct Binder {
     pub visible_from: u32,
     pub scope_start: u32,
     pub scope_end: u32,
+    pub cell: Cell,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +52,7 @@ pub struct Occurrence {
     pub qualifier: Option<String>,
     pub target: Target,
     pub node: NodeId,
+    pub cell: Cell,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -74,6 +77,7 @@ impl Analysis {
             d: dialect,
             a: Analysis::default(),
             ns: None,
+            name_cells: FxHashMap::default(),
         };
         w.run();
         w.a
@@ -139,6 +143,7 @@ struct Walker<'a> {
     d: &'a Dialect,
     a: Analysis,
     ns: Option<String>,
+    name_cells: FxHashMap<NodeId, Cell>,
 }
 
 impl Walker<'_> {
@@ -288,6 +293,7 @@ impl Walker<'_> {
             }
             _ => return false,
         };
+        self.name_cells.insert(name_node, spec.cell);
 
         let mut signatures = Vec::new();
         let mut param_scopes = Vec::new();
@@ -390,6 +396,7 @@ impl Walker<'_> {
             doc,
             namespace: self.ns.clone(),
             indent: self.indent_hint(id, spec.name),
+            cell: spec.cell,
         });
         true
     }
@@ -639,6 +646,7 @@ impl Walker<'_> {
             visible_from,
             scope_start: s.start,
             scope_end: s.end,
+            cell: Cell::Value,
         });
         self.a.scopes.entry(scope).or_default().push(idx);
         self.a.binder_nodes.insert(n, idx);
@@ -654,12 +662,21 @@ impl Walker<'_> {
         let node = t.node(id);
         let start = node.end - base.len() as u32;
         let key = self.key(base);
+        let cell = if let Some(&b) = self.a.binder_nodes.get(&id) {
+            self.a.binders[b as usize].cell
+        } else if let Some(&c) = self.name_cells.get(&id) {
+            c
+        } else if self.function_cell(id) {
+            Cell::Function
+        } else {
+            Cell::Value
+        };
         let target = if let Some(&b) = self.a.binder_nodes.get(&id) {
             Target::Local(b)
         } else if qualifier.is_some() {
             Target::Global
         } else {
-            self.resolve(id, &key, node.start)
+            self.resolve(id, &key, node.start, cell)
         };
         self.a.occurrences.push(Occurrence {
             key,
@@ -668,10 +685,51 @@ impl Walker<'_> {
             qualifier: qualifier.map(str::to_owned),
             target,
             node: id,
+            cell,
         });
     }
 
-    fn resolve(&self, id: NodeId, key: &str, offset: u32) -> Target {
+    /// Function cell for a call head, `#'` reference or `(function f)` argument,
+    /// unless the list is a `cond` clause test or a reader vector's data.
+    fn function_cell(&self, id: NodeId) -> bool {
+        let t = self.tree;
+        let Some(p) = t.parent(id) else {
+            return false;
+        };
+        match t.node(p).kind {
+            NodeKind::Prefix => t.prefix_text(p) == "#'" && t.children(p) == [id],
+            NodeKind::List(Delim::Paren) => {
+                if t.child(p, 0) != Some(id) {
+                    let head = t.head(p).map(|h| self.key(h));
+                    return t.child(p, 1) == Some(id) && head.as_deref() == Some("function");
+                }
+                !(self.cond_clause(p) || self.reader_vector(p))
+            }
+            _ => false,
+        }
+    }
+
+    /// True when `id` is a non-head child of a `(cond ...)` form.
+    fn cond_clause(&self, id: NodeId) -> bool {
+        let t = self.tree;
+        let Some(p) = t.parent(id) else {
+            return false;
+        };
+        t.node(p).kind == NodeKind::List(Delim::Paren)
+            && t.head(p).map(|h| self.key(h)).as_deref() == Some("cond")
+            && t.child(p, 0) != Some(id)
+    }
+
+    /// True when `id`'s parent is a `#` prefix (a reader vector, `#(...)`).
+    fn reader_vector(&self, id: NodeId) -> bool {
+        let t = self.tree;
+        let Some(p) = t.parent(id) else {
+            return false;
+        };
+        t.node(p).kind == NodeKind::Prefix && t.prefix_text(p) == "#"
+    }
+
+    fn resolve(&self, id: NodeId, key: &str, offset: u32, cell: Cell) -> Target {
         for anc in self.tree.ancestors(id).skip(1) {
             let Some(ids) = self.a.scopes.get(&anc) else {
                 continue;
@@ -680,7 +738,7 @@ impl Walker<'_> {
                 .iter()
                 .filter(|&&b| {
                     let b = &self.a.binders[b as usize];
-                    b.key == key && b.visible_from <= offset
+                    b.key == key && b.visible_from <= offset && self.d.cells_match(b.cell, cell)
                 })
                 .max_by_key(|&&b| self.a.binders[b as usize].visible_from);
             if let Some(&b) = best {

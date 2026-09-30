@@ -18,18 +18,26 @@ fn def<'a>(a: &'a Analysis, name: &str) -> &'a Def {
     })
 }
 
-/// Target of the n-th occurrence of `name` (0-based), as (binder start) or None for global.
-fn target(src: &str, a: &Analysis, name: &str, n: usize) -> Option<u32> {
-    let occ = a
-        .occurrences
+/// The n-th occurrence of `name` (0-based).
+fn occ<'a>(src: &str, a: &'a Analysis, name: &str, n: usize) -> &'a Occurrence {
+    a.occurrences
         .iter()
         .filter(|o| &src[o.start as usize..o.end as usize] == name)
         .nth(n)
-        .unwrap_or_else(|| panic!("occurrence {n} of {name}"));
-    match occ.target {
+        .unwrap_or_else(|| panic!("occurrence {n} of {name}"))
+}
+
+/// Target of the n-th occurrence of `name` (0-based), as (binder start) or None for global.
+fn target(src: &str, a: &Analysis, name: &str, n: usize) -> Option<u32> {
+    match occ(src, a, name, n).target {
         Target::Local(b) => Some(a.binders[b as usize].start),
         Target::Global => None,
     }
+}
+
+/// Cell of the n-th occurrence of `name` (0-based).
+fn cell(src: &str, a: &Analysis, name: &str, n: usize) -> Cell {
+    occ(src, a, name, n).cell
 }
 
 fn nth(src: &str, pat: &str, n: usize) -> u32 {
@@ -306,4 +314,64 @@ fn lookups_by_offset() {
     let visible: Vec<_> = a.visible_binders(16).map(|b| b.name.as_str()).collect();
     assert_eq!(visible, ["x"]);
     assert!(a.visible_binders(3).next().is_none());
+}
+
+#[test]
+fn lisp2_call_head_skips_value_binder() {
+    let src = "(defun f (x) x) (let ((f 1)) (f f))";
+    let (_, a) = analyze("lispico-cl", src);
+    assert_eq!(cell(src, &a, "f", 2), Cell::Function);
+    assert_eq!(target(src, &a, "f", 2), None);
+    assert_eq!(cell(src, &a, "f", 3), Cell::Value);
+    assert_eq!(target(src, &a, "f", 3), target(src, &a, "f", 1));
+}
+
+#[test]
+fn lisp2_function_reference() {
+    let src = "(defun g (x) x) (mapcar #'g xs) (funcall (function g) 1)";
+    let (_, a) = analyze("lispico-cl", src);
+    for n in 1..3 {
+        assert_eq!(cell(src, &a, "g", n), Cell::Function, "occurrence {n}");
+        assert_eq!(target(src, &a, "g", n), None, "occurrence {n}");
+    }
+}
+
+#[test]
+fn lisp2_same_name_both_cells() {
+    let src = "(def n 1) (defun n () 2) (n) n";
+    let (_, a) = analyze("lispico-cl", src);
+    assert_eq!(cell(src, &a, "n", 0), Cell::Value);
+    assert_eq!(cell(src, &a, "n", 1), Cell::Function);
+    assert_eq!(cell(src, &a, "n", 2), Cell::Function);
+    assert_eq!(cell(src, &a, "n", 3), Cell::Value);
+}
+
+#[test]
+fn lisp1_call_head_uses_let_binder() {
+    let src = "(let [f inc] (f 1))";
+    let (_, a) = analyze("lispico-clojure", src);
+    assert_eq!(target(src, &a, "f", 1), target(src, &a, "f", 0));
+}
+
+#[test]
+fn lisp2_cond_clause_test_is_value() {
+    let src = "(let ((x 1)) (cond (x 2)))";
+    let (_, a) = analyze("lispico-cl", src);
+    assert_eq!(cell(src, &a, "x", 1), Cell::Value);
+    assert_eq!(target(src, &a, "x", 1), target(src, &a, "x", 0));
+}
+
+#[test]
+fn lisp2_reader_vector_is_value() {
+    let src = "(let ((x 1)) #(x 2))";
+    let (_, a) = analyze("lispico-cl", src);
+    assert_eq!(cell(src, &a, "x", 1), Cell::Value);
+    assert_eq!(target(src, &a, "x", 1), target(src, &a, "x", 0));
+}
+
+#[test]
+fn stock_flet_single_namespace() {
+    let src = "(flet ((g () 1)) (g))";
+    let (_, a) = analyze("common-lisp", src);
+    assert_eq!(target(src, &a, "g", 1), target(src, &a, "g", 0));
 }
