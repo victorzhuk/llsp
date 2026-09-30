@@ -196,7 +196,11 @@ fn cl_vocabulary() {
     for src in ["(car xs)", "(first xs)", "(mapcar f xs)"] {
         let t = tree("lispico-cl", src);
         let a = llsp::analysis::Analysis::new(&t, &d);
-        let diags = diagnostics::check(&t, &a, &d, &Diagnostics::default(), |_| true);
+        let cfg = Diagnostics {
+            unresolved_call: llsp::config::Level::Error,
+            ..Diagnostics::default()
+        };
+        let diags = diagnostics::check(&t, &a, &d, &cfg, |_| false);
         assert!(
             !diags.iter().any(|x| x.code == "unresolved-call"),
             "{src}: {diags:?}"
