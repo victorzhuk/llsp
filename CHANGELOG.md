@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Two Lispico dialects, `lispico-clojure` and `lispico-cl`, with `function_cells` support
+  and `reader.invalid` diagnostics. They claim no file extensions and are selected by
+  language ID or `files.associations`.
+- Note: semantic token classification stays keyed on the bare name, so a name in value
+  position that shares a function definition may still be colored as a function.
+
 ## [0.1.4] - 2026-09-29
 
 ### Changed

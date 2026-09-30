@@ -3,7 +3,10 @@
 Fast, static language server for Lisp dialects, written in Rust.
 
 Supports Common Lisp, Clojure (clj/cljs/cljc/edn), Scheme (R7RS, Guile, Chicken), Racket,
-Emacs Lisp, Fennel and Janet. Each dialect is a TOML file in [`dialects/`](dialects) that you
+Emacs Lisp, Fennel, Janet and the two Lispico dialects `lispico-clojure` and `lispico-cl`.
+The Lispico dialects claim no extensions: llsp picks them up by language ID
+(`lispico-clojure`, `lispico-cl`) or through `files.associations`. Each dialect is a TOML
+file in [`dialects/`](dialects) that you
 can override, extend, or build on with `extends`.
 
 llsp never evaluates your code: no reader macros, build tools, subprocesses or network access.
@@ -92,6 +95,17 @@ Dialect keys include `extends`, `extensions`, `language_ids`, `case_sensitive`, 
 The dialect of a file comes from the first match of: `files.associations` (glob → dialect),
 the editor's `languageId`, a `#lang` line or `-*- mode: X -*-` modeline, the file extension,
 `files.default_dialect`.
+
+For a Lispico project whose files use the `.lpc` extension, associate them in
+`settings.json`:
+
+```json
+{
+  "files.associations": {
+    "*.lpc": "lispico-cl"
+  }
+}
+```
 
 ## Security
 

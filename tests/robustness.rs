@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use serde_json::{Value, json};
 use support::Client;
 
-const DIALECTS: [(&str, &str); 7] = [
+const DIALECTS: [(&str, &str); 9] = [
     ("lisp", "file:///w/a.lisp"),
     ("clojure", "file:///w/a.clj"),
     ("scheme", "file:///w/a.scm"),
@@ -13,6 +13,8 @@ const DIALECTS: [(&str, &str); 7] = [
     ("emacs-lisp", "file:///w/a.el"),
     ("fennel", "file:///w/a.fnl"),
     ("janet", "file:///w/a.janet"),
+    ("lispico-clojure", "file:///w/a.lpc"),
+    ("lispico-cl", "file:///w/b.lpc"),
 ];
 
 const POSITION_REQUESTS: [&str; 8] = [
@@ -111,7 +113,7 @@ proptest! {
     #[test]
     fn every_request_survives_random_documents(
         text in lisp_text(),
-        d in 0usize..7,
+        d in 0usize..9,
         positions in proptest::collection::vec((0u32..4, 0u32..30), 1..4),
     ) {
         let (lang, uri) = DIALECTS[d];

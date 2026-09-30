@@ -311,7 +311,7 @@ mod props {
     use super::*;
     use proptest::prelude::*;
 
-    const DIALECTS: [&str; 7] = [
+    const DIALECTS: [&str; 9] = [
         "common-lisp",
         "clojure",
         "scheme",
@@ -319,6 +319,8 @@ mod props {
         "emacs-lisp",
         "fennel",
         "janet",
+        "lispico-clojure",
+        "lispico-cl",
     ];
 
     fn lisp_ish() -> impl Strategy<Value = String> {
@@ -351,7 +353,7 @@ mod props {
 
     proptest! {
         #[test]
-        fn lossless_and_total(src in lisp_ish(), d in 0usize..7) {
+        fn lossless_and_total(src in lisp_ish(), d in 0usize..9) {
             let t = parse(DIALECTS[d], &src);
             let joined: String = t.tokens().iter().map(|k| t.token_text(k)).collect();
             prop_assert_eq!(&joined, &src);
@@ -366,7 +368,7 @@ mod props {
         }
 
         #[test]
-        fn arbitrary_text_never_panics(src in "\\PC*", d in 0usize..7) {
+        fn arbitrary_text_never_panics(src in "\\PC*", d in 0usize..9) {
             let t = parse(DIALECTS[d], &src);
             let joined: String = t.tokens().iter().map(|k| t.token_text(k)).collect();
             prop_assert_eq!(joined, src);
