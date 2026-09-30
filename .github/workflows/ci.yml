@@ -72,3 +72,70 @@ jobs:
           (cd "$mirror" && shasum -a 256 -- *.tar.gz > SHA256SUMS)
           LLSP_BASE_URL="file://$mirror" LLSP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
           "$RUNNER_TEMP/bin/llsp" --version | grep -q 0.0.0-test
+      - name: Reject install whose binary fails --version for every target mapping
+        run: |
+          base=$RUNNER_TEMP/broken
+          mirror=$base/mirror
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin; do
+            mkdir -p "$mirror/llsp-$t"
+            printf '#!/bin/sh\necho "broken-%s" >&2\nexit 3\n' "$t" > "$mirror/llsp-$t/llsp"
+            chmod 755 "$mirror/llsp-$t/llsp"
+            tar -czf "$mirror/llsp-$t.tar.gz" -C "$mirror" "llsp-$t"
+          done
+          (cd "$mirror" && shasum -a 256 -- *.tar.gz > SHA256SUMS)
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin; do
+            case $target in
+              *-linux-*) uname_s=Linux ;;
+              *) uname_s=Darwin ;;
+            esac
+            uname_m=${target%%-*}
+            shims=$base/shims-$target
+            mkdir -p "$shims"
+            cat > "$shims/uname" <<EOF
+          #!/bin/sh
+          case "\$1" in
+            -s) echo "$uname_s" ;;
+            -m) echo "$uname_m" ;;
+            *) exit 1 ;;
+          esac
+          EOF
+            chmod 755 "$shims/uname"
+            if [ "$uname_s" = Darwin ]; then
+              case $uname_m in
+                arm64) arm64=1 ;;
+                *) arm64=0 ;;
+              esac
+              cat > "$shims/sysctl" <<EOF
+          #!/bin/sh
+          [ "\$1" = -n ] && [ "\$2" = hw.optional.arm64 ] && { echo "$arm64"; exit 0; }
+          exit 1
+          EOF
+            else
+              # Fails if ever invoked: install.sh must not call sysctl on Linux.
+              printf '#!/bin/sh\nexit 1\n' > "$shims/sysctl"
+            fi
+            chmod 755 "$shims/sysctl"
+            out=$base/out-$target
+            rm -rf "$out"
+            log=$base/log-$target
+            if PATH="$shims:$PATH" LLSP_BASE_URL="file://$mirror" LLSP_INSTALL_DIR="$out" sh install.sh >"$log" 2>&1; then
+              echo "install.sh unexpectedly succeeded for $target" >&2
+              cat "$log" >&2
+              exit 1
+            fi
+            if ! grep -q -- "--version failed; refusing to report success" "$log"; then
+              echo "install.sh did not report the --version failure for $target" >&2
+              cat "$log" >&2
+              exit 1
+            fi
+            if ! grep -q "downloading llsp-$target.tar.gz" "$log" || ! grep -q "broken-$target" "$log"; then
+              echo "expected the $target archive to be selected" >&2
+              cat "$log" >&2
+              exit 1
+            fi
+            if grep -q "installed llsp .* to " "$log"; then
+              echo "install.sh printed installed success despite --version failure for $target" >&2
+              cat "$log" >&2
+              exit 1
+            fi
+          done

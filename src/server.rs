@@ -448,11 +448,12 @@ impl Server {
         let doc = p.text_document;
         let uri = normalize_uri(&doc.uri);
         let path = uri_to_path(&uri);
+        let language_id = Some(doc.language_id);
         let dialect = self
             .settings
-            .detect(path.as_deref(), Some(&doc.language_id), &doc.text);
+            .detect(path.as_deref(), language_id.as_deref(), &doc.text);
         let max = self.settings.config.files.max_file_size;
-        let document = Document::new(doc.uri, doc.text, doc.version, dialect, max);
+        let document = Document::new(doc.uri, doc.text, doc.version, language_id, dialect, max);
         if document.oversized() {
             self.warn_oversized(&document);
         }
@@ -550,12 +551,15 @@ impl Server {
         for uri in uris {
             let doc = &self.docs[&uri];
             let path = uri_to_path(&uri);
-            let dialect = self.settings.detect(path.as_deref(), None, doc.text());
+            let dialect =
+                self.settings
+                    .detect(path.as_deref(), doc.language_id.as_deref(), doc.text());
             let max = self.settings.config.files.max_file_size;
             let fresh = Document::new(
                 doc.client_uri.clone(),
                 doc.text().to_owned(),
                 doc.version,
+                doc.language_id.clone(),
                 dialect,
                 max,
             );

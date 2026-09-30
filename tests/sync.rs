@@ -6,6 +6,23 @@ use support::Client;
 
 const URI: &str = "file:///w/a.lisp";
 
+fn sorted_codes_ranges(d: &[serde_json::Value]) -> Vec<(String, u64, u64)> {
+    let mut v: Vec<(String, u64, u64)> = d
+        .iter()
+        .map(|d| {
+            assert_eq!(d["range"]["start"]["line"], json!(0));
+            assert_eq!(d["range"]["end"]["line"], json!(0));
+            (
+                d["code"].as_str().unwrap().to_string(),
+                d["range"]["start"]["character"].as_u64().unwrap(),
+                d["range"]["end"]["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
 #[test]
 fn open_publishes_syntax_diagnostics() {
     let mut c = Client::start();
@@ -82,6 +99,85 @@ fn dialect_from_association_and_modeline() {
         c.diagnostics("file:///w/b.lisp").is_empty(),
         "braces are constituents in CL"
     );
+    c.shutdown();
+}
+
+#[test]
+fn language_id_survives_configuration_reload() {
+    for (id, uri, text, expected) in [
+        (
+            "lispico-clojure",
+            "file:///w/rules/a",
+            "#(1 2)",
+            vec![("invalid-syntax", 0, 1)],
+        ),
+        (
+            "lispico-cl",
+            "file:///w/rules/b",
+            "(f [x])",
+            vec![("invalid-syntax", 3, 4), ("invalid-syntax", 5, 6)],
+        ),
+    ] {
+        let expected = {
+            let mut v: Vec<(String, u64, u64)> = expected
+                .into_iter()
+                .map(|(c, s, e)| (c.to_string(), s, e))
+                .collect();
+            v.sort();
+            v
+        };
+
+        let mut c = Client::start();
+        c.open(uri, id, text);
+        assert_eq!(
+            sorted_codes_ranges(&c.diagnostics(uri)),
+            expected,
+            "{id} baseline"
+        );
+        // Any settings change reloads open documents; the client ID must stick.
+        for _ in 0..3 {
+            c.notify_raw("workspace/didChangeConfiguration", json!({"settings": {}}));
+            assert_eq!(
+                sorted_codes_ranges(&c.diagnostics(uri)),
+                expected,
+                "{id} after reload"
+            );
+        }
+        c.shutdown();
+    }
+
+    // A configured association overrides the retained client ID.
+    let uri = "file:///w/rules/a";
+    let mut c = Client::start();
+    c.open(uri, "lispico-clojure", "#(1 2)");
+    assert_eq!(
+        sorted_codes_ranges(&c.diagnostics(uri)),
+        vec![("invalid-syntax".into(), 0, 1)],
+        "clojure baseline"
+    );
+    c.notify_raw(
+        "workspace/didChangeConfiguration",
+        json!({"settings": {"files": {"associations": {"**/rules/a": "lispico-cl"}}}}),
+    );
+    assert!(
+        c.diagnostics(uri).is_empty(),
+        "#(1 2) is a valid vector in lispico-cl"
+    );
+    // Removing the association falls back to the retained client ID.
+    c.notify_raw("workspace/didChangeConfiguration", json!({"settings": {}}));
+    assert_eq!(
+        sorted_codes_ranges(&c.diagnostics(uri)),
+        vec![("invalid-syntax".into(), 0, 1)],
+        "clojure diagnostics return without association"
+    );
+    for _ in 0..3 {
+        c.notify_raw("workspace/didChangeConfiguration", json!({"settings": {}}));
+        assert_eq!(
+            sorted_codes_ranges(&c.diagnostics(uri)),
+            vec![("invalid-syntax".into(), 0, 1)],
+            "clojure diagnostics persist across repeated reloads"
+        );
+    }
     c.shutdown();
 }
 

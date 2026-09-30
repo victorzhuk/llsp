@@ -82,7 +82,8 @@ cp "$tmp/llsp-$target/llsp" "$dir/.llsp.tmp"
 chmod 755 "$dir/.llsp.tmp"
 mv -f "$dir/.llsp.tmp" "$dir/llsp"
 
-echo "llsp install: installed $("$dir/llsp" --version) to $dir/llsp"
+installed_version=$("$dir/llsp" --version) || fail "installed $dir/llsp --version failed; refusing to report success"
+echo "llsp install: installed $installed_version to $dir/llsp"
 case ":$PATH:" in
 *":$dir:"*) ;;
 *) echo "llsp install: $dir is not in PATH; add it in your shell profile" ;;

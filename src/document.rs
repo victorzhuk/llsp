@@ -22,6 +22,8 @@ pub struct Document {
     pub version: i32,
     /// URI as the client spelled it, for messages sent back.
     pub client_uri: Uri,
+    /// Language ID the client reported, retained across reloads.
+    pub language_id: Option<String>,
     pub dialect: Arc<Dialect>,
     tree: Tree,
     lines: LineIndex,
@@ -35,6 +37,7 @@ impl Document {
         client_uri: Uri,
         text: String,
         version: i32,
+        language_id: Option<String>,
         dialect: Arc<Dialect>,
         max_size: u64,
     ) -> Self {
@@ -42,6 +45,7 @@ impl Document {
         let mut doc = Self {
             version,
             client_uri,
+            language_id,
             dialect,
             tree: Tree::unparsed(String::new()),
             lines,
@@ -274,6 +278,7 @@ mod tests {
             test_uri(),
             text.into(),
             0,
+            None,
             d.get("common-lisp").unwrap().clone(),
             u64::MAX,
         )
@@ -324,7 +329,7 @@ mod tests {
     fn oversized_is_kept_unparsed() {
         let d = crate::dialect::Dialects::builtin();
         let cl = d.get("common-lisp").unwrap().clone();
-        let mut doc = Document::new(test_uri(), "(defun f ())".into(), 0, cl, 5);
+        let mut doc = Document::new(test_uri(), "(defun f ())".into(), 0, None, cl, 5);
         assert!(doc.oversized());
         assert_eq!(doc.text(), "(defun f ())");
         assert!(doc.analysis().defs.is_empty());
