@@ -8,6 +8,7 @@ use lsp_types::{
 
 use super::{Sym, owner};
 use crate::analysis::{Target, symbol_like};
+use crate::dialect::Cell;
 use crate::document::Document;
 use crate::server::{HandlerResult, ResponseError, Server};
 use crate::syntax::{NodeKind, Tree};
@@ -33,9 +34,12 @@ impl Server {
                     doc.range(b.start, b.end, self.enc),
                 )]
             }
-            Sym::Global { key, explicit, .. } => {
-                self.global_definitions(&uri, doc, &key, explicit.as_deref())
-            }
+            Sym::Global {
+                key,
+                explicit,
+                cell,
+                ..
+            } => self.global_definitions(&uri, doc, &key, explicit.as_deref(), cell),
         };
         Ok((!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations)))
     }
@@ -46,12 +50,14 @@ impl Server {
         doc: &Document,
         key: &str,
         qualifier: Option<&str>,
+        cell: Cell,
     ) -> Vec<Location> {
         let same = self.same_dialect(doc);
+        let cells = &doc.dialect;
         let mut defs: Vec<_> = self
             .index
             .defs_named(key)
-            .filter(|(f, _)| same(f))
+            .filter(|(f, d)| same(f) && cells.cells_match(d.cell, cell))
             .collect();
         if let Some(q) = qualifier
             && defs.iter().any(|(_, d)| d.namespace.as_deref() == Some(q))
@@ -88,9 +94,11 @@ impl Server {
                 key,
                 explicit,
                 context,
+                cell,
             } => {
                 let same = self.same_dialect(doc);
-                let defined = self.defined_namespaces(doc, &key);
+                let cells = &doc.dialect;
+                let defined = self.defined_namespaces(doc, &key, cell);
                 let target = owner(&defined, explicit.as_deref(), context.as_deref());
                 let mut files: Vec<_> = self
                     .index
@@ -104,6 +112,7 @@ impl Server {
                         Vec::new()
                     } else {
                         f.defs_named(&key)
+                            .filter(|d| cells.cells_match(d.cell, cell))
                             .map(|d| (d.name_start, d.name_end))
                             .collect()
                     };
@@ -111,6 +120,7 @@ impl Server {
                     out.extend(
                         f.refs[&key]
                             .iter()
+                            .filter(|r| cells.cells_match(r.cell, cell))
                             .filter(|r| target.is_none() || resolves_to(&defined, f, r) == target)
                             .filter(|r| {
                                 !decls.iter().any(|&(ds, de)| ds <= r.start && r.start < de)
@@ -151,10 +161,14 @@ impl Server {
                     .map(|(s, e)| highlight(s, e, s == start))
                     .collect()
             }
-            Sym::Global { key, .. } => {
+            Sym::Global { key, cell, .. } => {
                 a.occurrences
                     .iter()
-                    .filter(|o| o.target == Target::Global && o.key == key)
+                    .filter(|o| {
+                        o.target == Target::Global
+                            && o.key == key
+                            && doc.dialect.cells_match(o.cell, cell)
+                    })
                     .map(|o| {
                         let is_def = a.defs.iter().any(|d| {
                             d.key == key && d.name_start <= o.start && o.start < d.name_end
@@ -181,9 +195,10 @@ impl Server {
             key,
             explicit,
             context,
+            cell,
         } = &sym
         {
-            let defined = self.defined_namespaces(doc, key);
+            let defined = self.defined_namespaces(doc, key, *cell);
             rename_target(&defined, key, explicit.as_deref(), context.as_deref())?;
         }
         let text = &doc.text()[occ.start as usize..occ.end as usize];
@@ -221,15 +236,18 @@ impl Server {
                 key,
                 explicit,
                 context,
+                cell,
             } => {
                 let same = self.same_dialect(doc);
-                let defined = self.defined_namespaces(doc, &key);
+                let cells = &doc.dialect;
+                let defined = self.defined_namespaces(doc, &key, cell);
                 let target =
                     rename_target(&defined, &key, explicit.as_deref(), context.as_deref())?;
-                let refs = self
-                    .index
-                    .refs_named(&key)
-                    .filter(|&(f, r)| same(f) && resolves_to(&defined, f, r) == Some(target));
+                let refs = self.index.refs_named(&key).filter(|&(f, r)| {
+                    same(f)
+                        && cells.cells_match(r.cell, cell)
+                        && resolves_to(&defined, f, r) == Some(target)
+                });
                 for (f, r) in refs {
                     let loc = self.location(f, r.start, r.end);
                     changes

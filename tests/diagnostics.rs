@@ -82,3 +82,32 @@ fn debounce_coalesces_changes() {
     assert!(p["diagnostics"].as_array().unwrap().is_empty());
     c.shutdown();
 }
+
+#[test]
+fn lispico_value_binding_call_unresolved() {
+    let l = layers(
+        "[files.associations]\n\"*.lisp\" = \"lispico-cl\"\n[diagnostics]\nunused_binding = \"off\"\nunresolved_call = \"warning\"",
+    );
+    let mut c = Client::with(l, json!({}));
+    c.open("file:///w/a.lisp", "lisp", "(let ((k 1)) (k))");
+    let d = c.diagnostics("file:///w/a.lisp");
+    assert_eq!(codes(&d), ["unresolved-call"]);
+    assert_eq!(d[0]["message"], "`k` is not defined in the workspace");
+    c.shutdown();
+
+    let ws = Workspace::new(&[("a.lisp", "(def n 1)"), ("b.lisp", "(n)")]);
+    let l = layers(
+        "[files.associations]\n\"*.lisp\" = \"lispico-cl\"\n[diagnostics]\nunused_binding = \"off\"\nunresolved_call = \"warning\"\ndebounce_ms = 0",
+    );
+    let root = llsp::document::path_to_uri(&ws.root()).unwrap();
+    let mut c = Client::with(l, json!({"rootUri": root.as_str()}));
+    ws.open(&mut c, "b.lisp");
+    let uri = ws.uri("b.lisp");
+    let mut d = c.diagnostics(&uri);
+    if d.is_empty() {
+        d = c.diagnostics(&uri);
+    }
+    assert_eq!(codes(&d), ["unresolved-call"]);
+    assert_eq!(d[0]["message"], "`n` is not defined in the workspace");
+    c.shutdown();
+}

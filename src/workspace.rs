@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use crate::analysis::{Analysis, Def, Target};
 use crate::config::Settings;
-use crate::dialect::Dialect;
+use crate::dialect::{Cell, Dialect};
 use crate::document::path_to_uri;
 use crate::syntax::Tree;
 
@@ -19,6 +19,7 @@ pub struct Ref {
     pub start: u32,
     pub end: u32,
     pub explicit: Option<String>,
+    pub cell: Cell,
 }
 
 /// What the workspace needs to know about one file without keeping its tree.
@@ -46,6 +47,7 @@ impl FileSummary {
                     start: o.start,
                     end: o.end,
                     explicit: analysis.explicit_namespace(&dialect, o),
+                    cell: o.cell,
                 });
             }
         }

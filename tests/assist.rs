@@ -205,3 +205,49 @@ fn hover_kinds() {
     assert!(v.is_null());
     c.shutdown();
 }
+
+#[test]
+fn lispico_assist_respects_cells() {
+    let ws = Workspace::new(&[
+        ("a.lisp", "(defun n () 2)"),
+        ("b.lisp", "(def n 1)\n(def nix 1)"),
+        ("c.lisp", "(let ((nils 1)) (nil))"),
+        ("d.lisp", "(n)\nn"),
+    ]);
+    let layers = Layers {
+        cli: toml::from_str("[files.associations]\n\"*.lisp\" = \"lispico-cl\"").unwrap(),
+        ..Layers::default()
+    };
+    let mut c = ws.client_with(layers, 3);
+    ws.open(&mut c, "c.lisp");
+    let v = c
+        .request_raw("textDocument/completion", after(&ws, "c.lisp", "(nil", 0))
+        .unwrap();
+    let l = labels(&v);
+    assert!(!l.contains(&"nils".to_owned()), "{l:?}");
+    assert!(!l.contains(&"nix".to_owned()), "{l:?}");
+    c.shutdown();
+
+    let ws = Workspace::new(&[
+        ("a.lisp", "(defun n () 2)"),
+        ("b.lisp", "(def n 1)"),
+        ("d.lisp", "(n)\nn"),
+    ]);
+    let layers = Layers {
+        cli: toml::from_str("[files.associations]\n\"*.lisp\" = \"lispico-cl\"").unwrap(),
+        ..Layers::default()
+    };
+    let mut c = ws.client_with(layers, 2);
+    ws.open(&mut c, "d.lisp");
+    let v = c
+        .request_raw("textDocument/hover", ws.pos("d.lisp", "n", 0))
+        .unwrap();
+    let h = v["contents"]["value"].as_str().unwrap();
+    assert!(h.contains("(n)"), "{h}");
+    let v = c
+        .request_raw("textDocument/hover", ws.pos("d.lisp", "n", 1))
+        .unwrap();
+    let h = v["contents"]["value"].as_str().unwrap();
+    assert!(!h.contains("(n)"), "{h}");
+    c.shutdown();
+}

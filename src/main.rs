@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use llsp::analysis::Analysis;
 use llsp::config::{Layers, Settings};
 use llsp::diagnostics::{self, Severity};
+use llsp::dialect::Cell;
 use llsp::document::{Encoding, path_to_uri, to_position};
 use llsp::syntax::Tree;
 use llsp::workspace::{self, FileSummary, Index};
@@ -233,9 +234,9 @@ fn check(settings: &Settings, paths: &[PathBuf], json: bool) -> Result<ExitCode>
     let mut reports = Vec::new();
     for (path, dialect, tree, analysis) in &files {
         let is_defined = |key: &str| {
-            index
-                .defs_named(key)
-                .any(|(f, _)| f.dialect.name == dialect.name)
+            index.defs_named(key).any(|(f, d)| {
+                f.dialect.name == dialect.name && dialect.cells_match(d.cell, Cell::Function)
+            })
         };
         let lines = line_index::LineIndex::new(tree.text());
         let found = diagnostics::check(

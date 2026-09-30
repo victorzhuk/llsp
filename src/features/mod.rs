@@ -10,7 +10,7 @@ pub(crate) use symbols::score_lowercase;
 use lsp_types::{Location, Position, Range, Uri};
 
 use crate::analysis::{Occurrence, Target};
-use crate::dialect::SymbolKind;
+use crate::dialect::{Cell, SymbolKind};
 use crate::document::{Document, lines_position, normalize_uri};
 use crate::server::Server;
 use crate::workspace::FileSummary;
@@ -24,6 +24,8 @@ pub(crate) enum Sym {
         explicit: Option<String>,
         /// Namespace current at the occurrence.
         context: Option<String>,
+        /// Value or function position of the occurrence.
+        cell: Cell,
     },
 }
 
@@ -68,6 +70,7 @@ impl Server {
                 key: occ.key.clone(),
                 explicit: a.explicit_namespace(&doc.dialect, occ),
                 context: a.namespace_at(occ.start).map(str::to_owned),
+                cell: occ.cell,
             },
         };
         Some((sym, occ))
@@ -102,12 +105,14 @@ impl Server {
         &'a self,
         doc: &'a Document,
         key: &'a str,
+        cell: Cell,
     ) -> Vec<Option<&'a str>> {
         let same = self.same_dialect(doc);
+        let cells = &doc.dialect;
         let mut v: Vec<Option<&str>> = self
             .index
             .defs_named(key)
-            .filter(|(f, _)| same(f))
+            .filter(|(f, d)| same(f) && cells.cells_match(d.cell, cell))
             .map(|(_, d)| d.namespace.as_deref())
             .collect();
         v.sort_unstable();

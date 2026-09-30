@@ -2,7 +2,7 @@ use rustc_hash::FxHashSet;
 
 use crate::analysis::{Analysis, Target};
 use crate::config::{Diagnostics, Level};
-use crate::dialect::{Dialect, SymbolKind};
+use crate::dialect::{Cell, Dialect, SymbolKind};
 use crate::syntax::{Delim, NodeKind, Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
@@ -76,7 +76,7 @@ pub fn check(
         unused_bindings(analysis, cfg, severity, &mut out);
     }
     if let Some(severity) = Severity::from_level(cfg.duplicate_definition) {
-        duplicate_definitions(analysis, severity, &mut out);
+        duplicate_definitions(analysis, dialect, severity, &mut out);
     }
     if let Some(severity) = Severity::from_level(cfg.unresolved_call) {
         unresolved_calls(
@@ -117,19 +117,20 @@ fn unused_bindings(a: &Analysis, cfg: &Diagnostics, severity: Severity, out: &mu
     }
 }
 
-fn duplicate_definitions(a: &Analysis, severity: Severity, out: &mut Vec<Diagnostic>) {
-    let mut seen: FxHashSet<(&str, SymbolKind, Option<&str>)> = FxHashSet::default();
-    for d in &a.defs {
-        if d.kind == SymbolKind::Method {
+fn duplicate_definitions(a: &Analysis, d: &Dialect, severity: Severity, out: &mut Vec<Diagnostic>) {
+    let mut seen: FxHashSet<(&str, SymbolKind, Option<&str>, Option<Cell>)> = FxHashSet::default();
+    for def in &a.defs {
+        if def.kind == SymbolKind::Method {
             continue;
         }
-        if !seen.insert((d.key.as_str(), d.kind, d.namespace.as_deref())) {
+        let cell = d.function_cells.then_some(def.cell);
+        if !seen.insert((def.key.as_str(), def.kind, def.namespace.as_deref(), cell)) {
             out.push(Diagnostic {
-                start: d.name_start,
-                end: d.name_end,
+                start: def.name_start,
+                end: def.name_end,
                 severity,
                 code: "duplicate-definition",
-                message: format!("`{}` is already defined in this file", d.name),
+                message: format!("`{}` is already defined in this file", def.name),
                 unnecessary: false,
             });
         }
@@ -150,9 +151,17 @@ fn unresolved_calls(
         .iter()
         .map(|s| d.normalize(s).into_owned())
         .collect();
-    let local: FxHashSet<&str> = a.defs.iter().map(|def| def.key.as_str()).collect();
+    let local: FxHashSet<&str> = a
+        .defs
+        .iter()
+        .filter(|def| !d.function_cells || def.cell == Cell::Function)
+        .map(|def| def.key.as_str())
+        .collect();
     for o in &a.occurrences {
         if o.target != Target::Global || o.qualifier.is_some() {
+            continue;
+        }
+        if d.function_cells && o.cell != Cell::Function {
             continue;
         }
         let Some(parent) = tree.parent(o.node) else {
@@ -308,6 +317,47 @@ mod tests {
             ..lints()
         };
         assert!(run("common-lisp", "(", cfg).is_empty());
+    }
+
+    #[test]
+    fn lisp2_def_and_defun_not_duplicate() {
+        assert!(run("lispico-cl", "(def n 1) (defun n () 2)", lints()).is_empty());
+        let cfg = Diagnostics {
+            unresolved_call: Level::Off,
+            ..lints()
+        };
+        assert_eq!(
+            run("common-lisp", "(defun f ()) (defthing f)", cfg),
+            [("duplicate-definition", "f".to_owned())]
+        );
+    }
+
+    #[test]
+    fn lisp2_cond_and_vector_heads_not_calls() {
+        assert!(
+            run(
+                "lispico-cl",
+                "(def x 1) (cond (x 2)) (let ((y 1)) #(y 2))",
+                lints()
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            run("lispico-cl", "(cond ((frob) 1))", lints()),
+            [("unresolved-call", "frob".to_owned())]
+        );
+    }
+
+    #[test]
+    fn lisp2_value_binding_in_call_position() {
+        let cfg = Diagnostics {
+            unused_binding: Level::Off,
+            ..lints()
+        };
+        assert_eq!(
+            run("lispico-cl", "(let ((k 1)) (k))", cfg),
+            [("unresolved-call", "k".to_owned())]
+        );
     }
 
     #[test]

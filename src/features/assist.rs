@@ -8,7 +8,7 @@ use rustc_hash::FxHashSet;
 
 use super::{Sym, symbols::fuzzy_score};
 use crate::analysis::{Def, Signature};
-use crate::dialect::{Dialect, SymbolKind};
+use crate::dialect::{Cell, Dialect, SymbolKind};
 use crate::document::Document;
 use crate::server::{HandlerResult, Server};
 use crate::syntax::{Delim, NodeId, NodeKind};
@@ -49,6 +49,17 @@ impl Server {
         let query = base.to_lowercase();
         let a = doc.analysis();
         let same = self.same_dialect(doc);
+        let fn_cells = doc.dialect.function_cells;
+        let at_call_head = tree.atom_at(offset).is_some_and(|atom| {
+            tree.parent(atom).is_some_and(|p| {
+                tree.node(p).kind == NodeKind::List(Delim::Paren) && tree.child(p, 0) == Some(atom)
+            })
+        });
+        let want_cell = if fn_cells && at_call_head {
+            Cell::Function
+        } else {
+            Cell::Value
+        };
         let cfg = &self.settings.config.completion;
 
         let mut out: Vec<Candidate> = Vec::new();
@@ -69,22 +80,27 @@ impl Server {
                 }
             }
             None => {
-                for b in a.visible_binders(offset) {
-                    if let Some(score) = fuzzy_score(&query, &b.name)
-                        && !(b.start <= offset && offset <= b.end)
-                    {
-                        push(Candidate {
-                            label: b.name.clone(),
-                            kind: CompletionItemKind::VARIABLE,
-                            detail: Some("local".into()),
-                            doc: None,
-                            score,
-                            rank: 0,
-                        });
+                if !fn_cells || !at_call_head {
+                    for b in a.visible_binders(offset) {
+                        if let Some(score) = fuzzy_score(&query, &b.name)
+                            && !(b.start <= offset && offset <= b.end)
+                        {
+                            push(Candidate {
+                                label: b.name.clone(),
+                                kind: CompletionItemKind::VARIABLE,
+                                detail: Some("local".into()),
+                                doc: None,
+                                score,
+                                rank: 0,
+                            });
+                        }
                     }
                 }
                 for f in self.index.files().filter(|f| same(f)) {
-                    for (score, d) in f.search(&query) {
+                    for (score, d) in f
+                        .search(&query)
+                        .filter(|(_, d)| doc.dialect.cells_match(d.cell, want_cell))
+                    {
                         push(def_candidate(d, score));
                     }
                 }
@@ -181,7 +197,7 @@ impl Server {
         let mut defs: Vec<(&std::sync::Arc<FileSummary>, &Def)> = self
             .index
             .defs_named(&occ.key)
-            .filter(|(f, _)| same(f))
+            .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
             .collect();
         defs.sort_by_key(|(f, _)| f.uri != uri);
         let name = tree.node_text(head);
@@ -277,12 +293,17 @@ impl Server {
                 let b = &doc.analysis().binders[b as usize];
                 format!("```{lang}\n{}\n```\nlocal binding", b.name)
             }
-            Sym::Global { key, explicit, .. } => {
+            Sym::Global {
+                key,
+                explicit,
+                cell,
+                ..
+            } => {
                 let same = self.same_dialect(doc);
                 let mut defs: Vec<_> = self
                     .index
                     .defs_named(&key)
-                    .filter(|(f, _)| same(f))
+                    .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, cell))
                     .collect();
                 if let Some(q) = &explicit
                     && defs.iter().any(|(_, d)| d.namespace.as_ref() == Some(q))

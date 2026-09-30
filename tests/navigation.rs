@@ -358,3 +358,42 @@ fn rename_refuses_ambiguous_packages() {
     assert_eq!(edits(&v), named(&[("a.lisp", 1, 7), ("c.lisp", 1, 6)]));
     c.shutdown();
 }
+
+#[test]
+fn lispico_cells_cross_file() {
+    let ws = Workspace::new(&[
+        ("a.lisp", "(defun n () 2)"),
+        ("b.lisp", "(def n 1)"),
+        ("c.lisp", "(n) n"),
+    ]);
+    let layers = Layers {
+        cli: toml::from_str("[files.associations]\n\"*.lisp\" = \"lispico-cl\"").unwrap(),
+        ..Layers::default()
+    };
+    let mut c = ws.client_with(layers, 2);
+    ws.open(&mut c, "c.lisp");
+    let v = c
+        .request_raw("textDocument/definition", ws.pos("c.lisp", "n", 0))
+        .unwrap();
+    assert_eq!(ranges(&v), [("a.lisp".into(), 0, 7, 8)]);
+    let v = c
+        .request_raw("textDocument/definition", ws.pos("c.lisp", "n", 1))
+        .unwrap();
+    assert_eq!(ranges(&v), [("b.lisp".into(), 0, 5, 6)]);
+
+    let mut p = ws.pos("c.lisp", "n", 0);
+    p["context"] = json!({"includeDeclaration": true});
+    let v = c.request_raw("textDocument/references", p).unwrap();
+    assert_eq!(
+        ranges(&v),
+        [("a.lisp".into(), 0, 7, 8), ("c.lisp".into(), 0, 1, 2)]
+    );
+
+    ws.open(&mut c, "a.lisp");
+    let mut p = ws.pos("a.lisp", " n ", 0);
+    p["position"]["character"] = json!(p["position"]["character"].as_u64().unwrap() + 1);
+    p["newName"] = json!("m");
+    let v = c.request_raw("textDocument/rename", p).unwrap();
+    assert_eq!(edits(&v), named(&[("a.lisp", 0, 7), ("c.lisp", 0, 1)]));
+    c.shutdown();
+}

@@ -22,6 +22,7 @@ use serde::de::DeserializeOwned;
 
 use crate::config::{Layers, Settings, json_to_table};
 use crate::diagnostics::{self, Severity};
+use crate::dialect::Cell;
 use crate::document::{Document, Encoding, normalize_uri, uri_to_path};
 use crate::workspace::{self, FileSummary, Index};
 
@@ -617,7 +618,11 @@ impl Server {
             return;
         };
         let same = |f: &FileSummary| f.dialect.name == doc.dialect.name;
-        let is_defined = |key: &str| self.index.defs_named(key).any(|(f, _)| same(f));
+        let is_defined = |key: &str| {
+            self.index
+                .defs_named(key)
+                .any(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
+        };
         let found = diagnostics::check(
             doc.tree(),
             doc.analysis(),
