@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::dialect::{BindingShape, DefSpec, Dialect, ParamSearch, Params, SymbolKind};
+use crate::dialect::{BindingShape, Cell, DefSpec, Dialect, ParamSearch, Params, SymbolKind};
 use crate::syntax::{Delim, NodeId, NodeKind, Tree};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,6 +184,7 @@ impl Walker<'_> {
                     name: 1,
                     params: None,
                     doc: None,
+                    cell: Cell::Value,
                 }
             })
         });

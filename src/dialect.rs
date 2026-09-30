@@ -57,6 +57,8 @@ pub struct Dialect {
     pub builtins: Vec<String>,
     #[serde(default)]
     pub constants: Vec<String>,
+    #[serde(default)]
+    pub function_cells: bool,
     #[serde(skip)]
     lookup: Lookup,
 }
@@ -137,6 +139,14 @@ pub enum SymbolKind {
     Test,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Cell {
+    #[default]
+    Value,
+    Function,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DefSpec {
@@ -147,6 +157,8 @@ pub struct DefSpec {
     pub params: Option<Params>,
     #[serde(default)]
     pub doc: Option<usize>,
+    #[serde(default)]
+    pub cell: Cell,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -321,6 +333,10 @@ impl Dialect {
 
     pub fn is_constant(&self, name: &str) -> bool {
         self.lookup.constants.contains(name)
+    }
+
+    pub fn cells_match(&self, a: Cell, b: Cell) -> bool {
+        !self.function_cells || a == b
     }
 
     pub fn has_def_prefix(&self, head: &str) -> bool {
@@ -543,6 +559,45 @@ case_sensitive = true"#,
         assert!(err.to_string().contains("invalid opener"), "{err}");
         let err = Dialects::load(&table("[common-lisp.reader]\ninvalid = [\"é\"]")).unwrap_err();
         assert!(err.to_string().contains("invalid opener"), "{err}");
+    }
+
+    #[test]
+    fn function_cells_default_off() {
+        let d = Dialects::builtin();
+        for name in [
+            "common-lisp",
+            "clojure",
+            "scheme",
+            "racket",
+            "emacs-lisp",
+            "fennel",
+            "janet",
+        ] {
+            let dialect = d.get(name).unwrap();
+            assert!(!dialect.function_cells, "{name}");
+            assert!(
+                dialect.defs.values().all(|spec| spec.cell == Cell::Value),
+                "{name}"
+            );
+        }
+        let cl = d.get("common-lisp").unwrap();
+        assert!(cl.cells_match(Cell::Value, Cell::Function));
+    }
+
+    #[test]
+    fn unknown_dialect_keys_rejected() {
+        let err = Dialects::load(&table("[common-lisp]\nfunction_cell = true")).unwrap_err();
+        assert!(format!("{err:#}").contains("unknown field"), "{err:#}");
+        let err = Dialects::load(&table(
+            "[common-lisp.defs]\ndefun = { kind = \"function\", cells = \"function\" }",
+        ))
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("unknown field"), "{err:#}");
+        let err = Dialects::load(&table(
+            "[common-lisp.defs]\ndefun = { kind = \"function\", cell = \"bogus\" }",
+        ))
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("unknown variant"), "{err:#}");
     }
 
     #[test]
