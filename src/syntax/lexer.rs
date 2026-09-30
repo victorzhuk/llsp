@@ -1,5 +1,5 @@
 use super::{ErrorKind, SyntaxError, Token, TokenKind};
-use crate::dialect::{CLOSE, OPEN, ReaderRules, SPECIAL, STOP};
+use crate::dialect::{CLOSE, INVALID, OPEN, ReaderRules, SPECIAL, STOP};
 
 pub fn lex(text: &str, rules: &ReaderRules) -> (Vec<Token>, Vec<SyntaxError>) {
     let mut lx = Lexer {
@@ -81,6 +81,12 @@ impl Lexer<'_> {
         let b = self.src[self.pos];
         let r = self.rules;
         let class = self.class(b);
+        if class & INVALID != 0 {
+            let start = self.pos;
+            self.pos += 1;
+            self.error(ErrorKind::InvalidSyntax, start, start + 1);
+            return TokenKind::Atom;
+        }
         if class & (SPECIAL | STOP) == 0 {
             self.atom();
             return TokenKind::Atom;

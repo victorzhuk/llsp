@@ -78,6 +78,7 @@ pub enum ErrorKind {
     UnterminatedString,
     UnterminatedComment,
     MissingForm,
+    InvalidSyntax,
 }
 
 impl ErrorKind {
@@ -89,6 +90,7 @@ impl ErrorKind {
             Self::UnterminatedString => "unterminated string",
             Self::UnterminatedComment => "unterminated block comment",
             Self::MissingForm => "prefix without a following form",
+            Self::InvalidSyntax => "invalid syntax for this dialect",
         }
     }
 
@@ -100,6 +102,7 @@ impl ErrorKind {
             Self::UnterminatedString => "unterminated-string",
             Self::UnterminatedComment => "unterminated-comment",
             Self::MissingForm => "missing-form",
+            Self::InvalidSyntax => "invalid-syntax",
         }
     }
 }

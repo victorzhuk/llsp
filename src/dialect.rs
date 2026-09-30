@@ -104,6 +104,8 @@ pub struct ReaderRules {
     #[serde(default)]
     pub sharp_dispatch: bool,
     #[serde(default)]
+    pub invalid: Vec<String>,
+    #[serde(default)]
     pub prefixes: HashMap<String, u8>,
     #[serde(skip)]
     pub(crate) sorted_prefixes: Vec<(String, u8)>,
@@ -117,6 +119,7 @@ pub(crate) const OPEN: u8 = 1;
 pub(crate) const CLOSE: u8 = 2;
 pub(crate) const STOP: u8 = 4;
 pub(crate) const SPECIAL: u8 = 8;
+pub(crate) const INVALID: u8 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -244,6 +247,17 @@ impl Dialect {
         }
         if r.sharp_dispatch {
             table[b'#' as usize] |= SPECIAL;
+        }
+        for s in &r.invalid {
+            let (&[b], true) = (s.as_bytes(), s.len() == 1) else {
+                bail!(
+                    "dialect {}: invalid opener {s:?} must be a single ASCII byte",
+                    self.name
+                );
+            };
+            table[b as usize] &= !(OPEN | CLOSE);
+            r.closers[b as usize] = 0;
+            table[b as usize] |= INVALID | SPECIAL;
         }
         r.delimiters = table;
         r.sorted_prefixes = r.prefixes.iter().map(|(k, v)| (k.clone(), *v)).collect();
@@ -521,6 +535,14 @@ case_sensitive = true"#,
         assert!(err.to_string().contains("bracket pair"), "{err}");
         let err = Dialects::load(&table("[common-lisp.reader]\nterminators = \"é\"")).unwrap_err();
         assert!(err.to_string().contains("terminators"), "{err}");
+    }
+
+    #[test]
+    fn invalid_openers_must_be_single_ascii_bytes() {
+        let err = Dialects::load(&table("[common-lisp.reader]\ninvalid = [\"##\"]")).unwrap_err();
+        assert!(err.to_string().contains("invalid opener"), "{err}");
+        let err = Dialects::load(&table("[common-lisp.reader]\ninvalid = [\"é\"]")).unwrap_err();
+        assert!(err.to_string().contains("invalid opener"), "{err}");
     }
 
     #[test]

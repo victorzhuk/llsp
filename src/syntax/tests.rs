@@ -183,6 +183,130 @@ fn shebang_is_comment() {
     );
 }
 
+fn load_dialect(src: &str) -> crate::dialect::Dialect {
+    let overrides: toml::Table = toml::from_str(src).unwrap();
+    let d = Dialects::load(&overrides).unwrap();
+    let d: &crate::dialect::Dialect = d.get("lx").unwrap();
+    d.clone()
+}
+
+fn parse_with(dialect: &crate::dialect::Dialect, src: &str) -> Tree {
+    Tree::parse(src.to_owned(), dialect)
+}
+
+#[test]
+fn invalid_openers_are_one_byte_atoms() {
+    let d = load_dialect(
+        r#"[lx]
+extends = "common-lisp"
+[lx.reader]
+invalid = ["[", "]", "{", "}"]
+terminators = "'`,[]{}""#,
+    );
+    let t = parse_with(&d, "(f [x])");
+    let errs: Vec<_> = t
+        .errors()
+        .iter()
+        .map(|e| (e.kind, e.start, e.end))
+        .collect();
+    assert_eq!(
+        errs,
+        [
+            (ErrorKind::InvalidSyntax, 3, 4),
+            (ErrorKind::InvalidSyntax, 5, 6)
+        ]
+    );
+    let toks: Vec<_> = t
+        .tokens()
+        .iter()
+        .filter(|k| k.kind != TokenKind::Whitespace)
+        .map(|k| (k.kind, t.token_text(k).to_owned()))
+        .collect();
+    assert_eq!(
+        toks,
+        [
+            (TokenKind::Open, "(".to_owned()),
+            (TokenKind::Atom, "f".to_owned()),
+            (TokenKind::Atom, "[".to_owned()),
+            (TokenKind::Atom, "x".to_owned()),
+            (TokenKind::Atom, "]".to_owned()),
+            (TokenKind::Close, ")".to_owned()),
+        ]
+    );
+    let kids: Vec<_> = (0..)
+        .map_while(|i| t.child(Tree::ROOT, i))
+        .map(|id| (t.node(id).kind, t.node(id).closed))
+        .collect();
+    assert_eq!(kids, [(NodeKind::List(Delim::Paren), true)]);
+}
+
+#[test]
+fn invalid_opener_precedes_prefix_and_dispatch() {
+    let d = load_dialect(
+        r##"[lx]
+extends = "clojure"
+[lx.reader]
+invalid = ["#"]"##,
+    );
+    let t = parse_with(&d, "#'f");
+    let toks: Vec<_> = t
+        .tokens()
+        .iter()
+        .filter(|k| k.kind != TokenKind::Whitespace)
+        .map(|k| (k.kind, t.token_text(k).to_owned()))
+        .collect();
+    assert_eq!(
+        toks,
+        [
+            (TokenKind::Atom, "#".to_owned()),
+            (TokenKind::Prefix, "'".to_owned()),
+            (TokenKind::Atom, "f".to_owned()),
+        ]
+    );
+    assert_eq!(
+        t.errors(),
+        [SyntaxError {
+            kind: ErrorKind::InvalidSyntax,
+            start: 0,
+            end: 1
+        }]
+    );
+
+    let t = parse_with(&d, "#(1 2)");
+    let toks: Vec<_> = t
+        .tokens()
+        .iter()
+        .filter(|k| k.kind != TokenKind::Whitespace)
+        .map(|k| (k.kind, t.token_text(k).to_owned()))
+        .collect();
+    assert_eq!(
+        toks,
+        [
+            (TokenKind::Atom, "#".to_owned()),
+            (TokenKind::Open, "(".to_owned()),
+            (TokenKind::Atom, "1".to_owned()),
+            (TokenKind::Atom, "2".to_owned()),
+            (TokenKind::Close, ")".to_owned()),
+        ]
+    );
+    for src in ["#_x", "#{1}"] {
+        let t = parse_with(&d, src);
+        let first = &t.tokens()[0];
+        assert_eq!(first.kind, TokenKind::Atom);
+        assert_eq!(t.token_text(first), "#");
+    }
+}
+
+#[test]
+fn empty_invalid_list_keeps_classification() {
+    let cl = parse("common-lisp", "[x]");
+    assert_eq!(dump(&cl), "Root[Atom\"[x]\"]");
+    assert!(cl.errors().is_empty());
+    let clj = parse("clojure", "{x}");
+    assert_eq!(dump(&clj), "Root[List(Brace)[Atom\"x\"]]");
+    assert!(clj.errors().is_empty());
+}
+
 mod props {
     use super::*;
     use proptest::prelude::*;
