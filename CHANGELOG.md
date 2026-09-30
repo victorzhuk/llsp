@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-30
+
 ### Added
 - Two Lispico dialects, `lispico-clojure` and `lispico-cl`, with `function_cells` support
   and `reader.invalid` diagnostics. They claim no file extensions and are selected by
@@ -63,7 +65,8 @@ First release.
 - The project `.llsp.toml` cannot configure logging, and log files are created readable only
   by their owner.
 
-[unreleased]: https://github.com/victorzhuk/llsp/compare/v0.1.4...HEAD
+[unreleased]: https://github.com/victorzhuk/llsp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/victorzhuk/llsp/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/victorzhuk/llsp/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/victorzhuk/llsp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/victorzhuk/llsp/compare/v0.1.0...v0.1.2
