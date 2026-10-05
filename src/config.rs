@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::dialect::Dialects;
+use crate::dialect::{Dialect, Dialects};
+use crate::tables::merge_tables;
 
 pub const PROJECT_FILE: &str = ".llsp.toml";
 const ENV_PREFIX: &str = "LLSP_";
@@ -286,6 +288,45 @@ impl Settings {
             associations,
         })
     }
+
+    /// Picks a dialect: associations, client language id, `#lang`/modeline,
+    /// extension, then the configured default.
+    pub fn detect(
+        &self,
+        path: Option<&Path>,
+        language_id: Option<&str>,
+        text: &str,
+    ) -> Arc<Dialect> {
+        let d = &self.dialects;
+        let by_assoc = || {
+            let path = path?;
+            let (_, name) = self.associations.iter().find(|(g, _)| g.is_match(path))?;
+            d.get(name)
+        };
+        let by_first_line = || {
+            let line = text.lines().next()?;
+            if let Some(lang) = line.strip_prefix("#lang ") {
+                let lang = lang.trim().split('/').next()?;
+                return d.by_modeline(lang).or_else(|| d.by_modeline("racket"));
+            }
+            let (_, rest) = line.split_once("-*-")?;
+            let (inner, _) = rest.split_once("-*-")?;
+            let mode = inner
+                .split(';')
+                .find_map(|kv| kv.trim().strip_prefix("mode:"))
+                .unwrap_or(inner)
+                .trim();
+            d.by_modeline(mode)
+        };
+        by_assoc()
+            .or_else(|| language_id.and_then(|id| d.by_language_id(id)))
+            .or_else(by_first_line)
+            .or_else(|| d.by_extension(path?.extension()?.to_str()?))
+            .or_else(|| d.get(&self.config.files.default_dialect))
+            .or_else(|| d.iter().next())
+            .cloned()
+            .expect("at least one dialect")
+    }
 }
 
 pub fn user_config_path() -> Option<PathBuf> {
@@ -297,18 +338,6 @@ pub fn user_config_path() -> Option<PathBuf> {
 fn read_table(path: &Path) -> Result<toml::Table> {
     let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("parse {}", path.display()))
-}
-
-/// Deep-merges `over` into `base`: tables merge recursively, anything else is replaced.
-pub fn merge_tables(base: &mut toml::Table, over: toml::Table) {
-    for (key, value) in over {
-        match (base.get_mut(&key), value) {
-            (Some(toml::Value::Table(b)), toml::Value::Table(o)) => merge_tables(b, o),
-            (_, value) => {
-                base.insert(key, value);
-            }
-        }
-    }
 }
 
 pub fn env_table(vars: impl IntoIterator<Item = (String, String)>) -> Result<toml::Table> {
@@ -364,36 +393,10 @@ fn insert_path<'a>(
     Ok(())
 }
 
-pub fn json_to_table(value: serde_json::Value) -> Result<toml::Table> {
-    match json_to_toml(value) {
-        Some(toml::Value::Table(t)) => Ok(t),
-        None => Ok(toml::Table::new()),
-        Some(other) => bail!("expected an object, got {}", other.type_str()),
-    }
-}
-
-fn json_to_toml(value: serde_json::Value) -> Option<toml::Value> {
-    use serde_json::Value as J;
-    Some(match value {
-        J::Null => return None,
-        J::Bool(b) => toml::Value::Boolean(b),
-        J::Number(n) => match n.as_i64() {
-            Some(i) => toml::Value::Integer(i),
-            None => toml::Value::Float(n.as_f64()?),
-        },
-        J::String(s) => toml::Value::String(s),
-        J::Array(a) => toml::Value::Array(a.into_iter().filter_map(json_to_toml).collect()),
-        J::Object(o) => toml::Value::Table(
-            o.into_iter()
-                .filter_map(|(k, v)| Some((k, json_to_toml(v)?)))
-                .collect(),
-        ),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tables::json_to_table;
 
     fn table(src: &str) -> toml::Table {
         toml::from_str(src).unwrap()
@@ -550,5 +553,28 @@ mod tests {
                 .def_spec("defroute")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn detection_order() {
+        let layers = Layers {
+            project: toml::from_str("[files.associations]\n\"*.lsp\" = \"emacs-lisp\"").unwrap(),
+            ..Layers::default()
+        };
+        let s = layers.resolve().unwrap();
+        let name = |p: Option<&str>, id: Option<&str>, text: &str| {
+            s.detect(p.map(Path::new), id, text).name.clone()
+        };
+        assert_eq!(name(Some("/a.lsp"), Some("lisp"), ""), "emacs-lisp");
+        assert_eq!(name(Some("/a.lisp"), Some("clojure"), ""), "clojure");
+        assert_eq!(
+            name(Some("/script"), Some("x"), ";; -*- mode: clojure -*-\n"),
+            "clojure"
+        );
+        assert_eq!(name(Some("/script"), None, ";; -*- Scheme -*-\n"), "scheme");
+        assert_eq!(name(Some("/m"), None, "#lang racket/base\n"), "racket");
+        assert_eq!(name(Some("/a.fnl"), None, ""), "fennel");
+        assert_eq!(name(Some("/a.unknown"), None, ""), "common-lisp");
+        assert_eq!(name(None, None, ""), "common-lisp");
     }
 }

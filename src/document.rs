@@ -7,7 +7,6 @@ use lsp_types::{Position, Range, TextDocumentContentChangeEvent, Uri};
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 
 use crate::analysis::Analysis;
-use crate::config::Settings;
 use crate::dialect::Dialect;
 use crate::syntax::Tree;
 
@@ -222,51 +221,9 @@ pub fn path_to_uri(path: &Path) -> Option<Uri> {
     Uri::from_str(&format!("file://{}", utf8_percent_encode(&s, PATH_SEGMENT))).ok()
 }
 
-impl Settings {
-    /// Picks a dialect: associations, client language id, `#lang`/modeline,
-    /// extension, then the configured default.
-    pub fn detect(
-        &self,
-        path: Option<&Path>,
-        language_id: Option<&str>,
-        text: &str,
-    ) -> Arc<Dialect> {
-        let d = &self.dialects;
-        let by_assoc = || {
-            let path = path?;
-            let (_, name) = self.associations.iter().find(|(g, _)| g.is_match(path))?;
-            d.get(name)
-        };
-        let by_first_line = || {
-            let line = text.lines().next()?;
-            if let Some(lang) = line.strip_prefix("#lang ") {
-                let lang = lang.trim().split('/').next()?;
-                return d.by_modeline(lang).or_else(|| d.by_modeline("racket"));
-            }
-            let (_, rest) = line.split_once("-*-")?;
-            let (inner, _) = rest.split_once("-*-")?;
-            let mode = inner
-                .split(';')
-                .find_map(|kv| kv.trim().strip_prefix("mode:"))
-                .unwrap_or(inner)
-                .trim();
-            d.by_modeline(mode)
-        };
-        by_assoc()
-            .or_else(|| language_id.and_then(|id| d.by_language_id(id)))
-            .or_else(by_first_line)
-            .or_else(|| d.by_extension(path?.extension()?.to_str()?))
-            .or_else(|| d.get(&self.config.files.default_dialect))
-            .or_else(|| d.iter().next())
-            .cloned()
-            .expect("at least one dialect")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Layers;
 
     fn test_uri() -> Uri {
         Uri::from_str("file:///t.lisp").unwrap()
@@ -370,28 +327,5 @@ mod tests {
         let win = Uri::from_str("file:///C:/src/a.el").unwrap();
         assert_eq!(uri_to_path(&win).unwrap(), PathBuf::from("C:/src/a.el"));
         assert!(uri_to_path(&Uri::from_str("untitled:Untitled-1").unwrap()).is_none());
-    }
-
-    #[test]
-    fn detection_order() {
-        let layers = Layers {
-            project: toml::from_str("[files.associations]\n\"*.lsp\" = \"emacs-lisp\"").unwrap(),
-            ..Layers::default()
-        };
-        let s = layers.resolve().unwrap();
-        let name = |p: Option<&str>, id: Option<&str>, text: &str| {
-            s.detect(p.map(Path::new), id, text).name.clone()
-        };
-        assert_eq!(name(Some("/a.lsp"), Some("lisp"), ""), "emacs-lisp");
-        assert_eq!(name(Some("/a.lisp"), Some("clojure"), ""), "clojure");
-        assert_eq!(
-            name(Some("/script"), Some("x"), ";; -*- mode: clojure -*-\n"),
-            "clojure"
-        );
-        assert_eq!(name(Some("/script"), None, ";; -*- Scheme -*-\n"), "scheme");
-        assert_eq!(name(Some("/m"), None, "#lang racket/base\n"), "racket");
-        assert_eq!(name(Some("/a.fnl"), None, ""), "fennel");
-        assert_eq!(name(Some("/a.unknown"), None, ""), "common-lisp");
-        assert_eq!(name(None, None, ""), "common-lisp");
     }
 }

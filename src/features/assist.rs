@@ -6,11 +6,12 @@ use lsp_types::{
 };
 use rustc_hash::FxHashSet;
 
-use super::{Sym, symbols::fuzzy_score};
+use super::FeatureResult;
 use crate::analysis::{Analysis, Def, Signature};
 use crate::dialect::{Cell, Dialect, SymbolKind};
 use crate::document::Document;
-use crate::server::{HandlerResult, Server};
+use crate::search::fuzzy_score;
+use crate::session::{Session, Sym, same_dialect};
 use crate::syntax::{Delim, NodeId, NodeKind, Tree};
 use crate::workspace::FileSummary;
 
@@ -23,314 +24,307 @@ struct Candidate {
     rank: u8,
 }
 
-impl Server {
-    pub(crate) fn completion(
-        &mut self,
-        p: CompletionParams,
-    ) -> HandlerResult<Option<CompletionResponse>> {
-        let pos = p.text_document_position;
-        let Some((_, doc)) = self.document(&pos.text_document.uri) else {
-            return Ok(None);
-        };
-        let offset = doc.offset(pos.position, self.enc);
-        let tree = doc.tree();
-        if tree.in_literal_or_comment(offset) {
-            return Ok(None);
-        }
-        let typed = match tree.atom_at(offset) {
-            Some(atom) => &doc.text()[tree.node(atom).start as usize..offset as usize],
-            None => "",
-        };
-        if doc.dialect.is_keyword(typed) || typed.starts_with('#') {
-            return Ok(None);
-        }
-        let (qualifier, base) = doc.dialect.split_qualified(typed);
-        let base_start = offset - base.len() as u32;
-        let query = base.to_lowercase();
-        let a = doc.analysis();
-        let same = self.same_dialect(doc);
-        let want_cell = completion_cell(tree, &doc.dialect, a, offset);
-        let cfg = &self.settings.config.completion;
+pub(crate) fn completion(
+    s: &Session,
+    p: CompletionParams,
+) -> FeatureResult<Option<CompletionResponse>> {
+    let pos = p.text_document_position;
+    let Some((_, doc)) = s.document(&pos.text_document.uri) else {
+        return Ok(None);
+    };
+    let offset = doc.offset(pos.position, s.enc);
+    let tree = doc.tree();
+    if tree.in_literal_or_comment(offset) {
+        return Ok(None);
+    }
+    let typed = match tree.atom_at(offset) {
+        Some(atom) => &doc.text()[tree.node(atom).start as usize..offset as usize],
+        None => "",
+    };
+    if doc.dialect.is_keyword(typed) || typed.starts_with('#') {
+        return Ok(None);
+    }
+    let (qualifier, base) = doc.dialect.split_qualified(typed);
+    let base_start = offset - base.len() as u32;
+    let query = base.to_lowercase();
+    let a = doc.analysis();
+    let same = same_dialect(doc);
+    let want_cell = completion_cell(tree, &doc.dialect, a, offset);
+    let cfg = &s.settings.config.completion;
 
-        let mut out: Vec<Candidate> = Vec::new();
-        let mut push = |c: Candidate| out.push(c);
-        match qualifier {
-            Some(q) => {
-                let ns = doc.dialect.normalize(a.resolve_qualifier(q)).into_owned();
-                for f in self.index.files().filter(|f| same(f)) {
-                    for d in f.defs.iter().filter(|d| {
-                        d.namespace.as_deref() == Some(&ns)
-                            && doc.dialect.cells_match(d.cell, want_cell)
-                    }) {
-                        if let Some(score) = fuzzy_score(&query, &d.name) {
-                            push(def_candidate(d, score));
-                        }
+    let mut out: Vec<Candidate> = Vec::new();
+    let mut push = |c: Candidate| out.push(c);
+    match qualifier {
+        Some(q) => {
+            let ns = doc.dialect.normalize(a.resolve_qualifier(q)).into_owned();
+            for f in s.index.files().filter(|f| same(f)) {
+                for d in f.defs.iter().filter(|d| {
+                    d.namespace.as_deref() == Some(&ns)
+                        && doc.dialect.cells_match(d.cell, want_cell)
+                }) {
+                    if let Some(score) = fuzzy_score(&query, &d.name) {
+                        push(def_candidate(d, score));
                     }
                 }
             }
-            None => {
-                if want_cell == Cell::Value {
-                    for b in a.visible_binders(offset) {
-                        if let Some(score) = fuzzy_score(&query, &b.name)
-                            && !(b.start <= offset && offset <= b.end)
-                        {
+        }
+        None => {
+            if want_cell == Cell::Value {
+                for b in a.visible_binders(offset) {
+                    if let Some(score) = fuzzy_score(&query, &b.name)
+                        && !(b.start <= offset && offset <= b.end)
+                    {
+                        push(Candidate {
+                            label: b.name.clone(),
+                            kind: CompletionItemKind::VARIABLE,
+                            detail: Some("local".into()),
+                            doc: None,
+                            score,
+                            rank: 0,
+                        });
+                    }
+                }
+            }
+            for f in s.index.files().filter(|f| same(f)) {
+                for (score, d) in f
+                    .search(&query)
+                    .filter(|(_, d)| doc.dialect.cells_match(d.cell, want_cell))
+                {
+                    push(def_candidate(d, score));
+                }
+            }
+            if cfg.builtins {
+                let d = &doc.dialect;
+                let lists = [
+                    (
+                        &d.special_forms,
+                        CompletionItemKind::KEYWORD,
+                        "special form",
+                    ),
+                    (&d.builtins, CompletionItemKind::FUNCTION, "builtin"),
+                    (&d.constants, CompletionItemKind::CONSTANT, "constant"),
+                ];
+                for (names, kind, detail) in lists {
+                    for n in names {
+                        if let Some(score) = fuzzy_score(&query, n) {
                             push(Candidate {
-                                label: b.name.clone(),
-                                kind: CompletionItemKind::VARIABLE,
-                                detail: Some("local".into()),
+                                label: n.clone(),
+                                kind,
+                                detail: Some(detail.into()),
                                 doc: None,
                                 score,
-                                rank: 0,
+                                rank: 2,
                             });
                         }
                     }
                 }
-                for f in self.index.files().filter(|f| same(f)) {
-                    for (score, d) in f
-                        .search(&query)
-                        .filter(|(_, d)| doc.dialect.cells_match(d.cell, want_cell))
-                    {
-                        push(def_candidate(d, score));
-                    }
-                }
-                if cfg.builtins {
-                    let d = &doc.dialect;
-                    let lists = [
-                        (
-                            &d.special_forms,
-                            CompletionItemKind::KEYWORD,
-                            "special form",
-                        ),
-                        (&d.builtins, CompletionItemKind::FUNCTION, "builtin"),
-                        (&d.constants, CompletionItemKind::CONSTANT, "constant"),
-                    ];
-                    for (names, kind, detail) in lists {
-                        for n in names {
-                            if let Some(score) = fuzzy_score(&query, n) {
-                                push(Candidate {
-                                    label: n.clone(),
-                                    kind,
-                                    detail: Some(detail.into()),
-                                    doc: None,
-                                    score,
-                                    rank: 2,
-                                });
-                            }
-                        }
-                    }
-                }
             }
         }
+    }
 
-        out.sort_by(|a, b| {
-            (a.score, a.rank, a.label.len(), &a.label).cmp(&(
-                b.score,
-                b.rank,
-                b.label.len(),
-                &b.label,
-            ))
-        });
-        let mut seen = FxHashSet::default();
-        out.retain(|c| seen.insert(doc.dialect.normalize(&c.label).into_owned()));
-        let incomplete = out.len() > cfg.max_items;
-        out.truncate(cfg.max_items);
+    out.sort_by(|a, b| {
+        (a.score, a.rank, a.label.len(), &a.label).cmp(&(b.score, b.rank, b.label.len(), &b.label))
+    });
+    let mut seen = FxHashSet::default();
+    out.retain(|c| seen.insert(doc.dialect.normalize(&c.label).into_owned()));
+    let incomplete = out.len() > cfg.max_items;
+    out.truncate(cfg.max_items);
 
-        let range = doc.range(base_start, offset, self.enc);
-        let items = out
-            .into_iter()
-            .enumerate()
-            .map(|(i, c)| CompletionItem {
-                label: c.label.clone(),
-                kind: Some(c.kind),
-                detail: c.detail,
-                documentation: c.doc.map(|d| {
+    let range = doc.range(base_start, offset, s.enc);
+    let items = out
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| CompletionItem {
+            label: c.label.clone(),
+            kind: Some(c.kind),
+            detail: c.detail,
+            documentation: c.doc.map(|d| {
+                Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: d,
+                })
+            }),
+            sort_text: Some(format!("{i:05}")),
+            filter_text: Some(c.label.clone()),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(range, c.label))),
+            ..Default::default()
+        })
+        .collect();
+    Ok(Some(CompletionResponse::List(CompletionList {
+        is_incomplete: incomplete,
+        items,
+    })))
+}
+
+pub(crate) fn signature_help(
+    s: &Session,
+    p: SignatureHelpParams,
+) -> FeatureResult<Option<SignatureHelp>> {
+    let pos = p.text_document_position_params;
+    let Some((uri, doc)) = s.document(&pos.text_document.uri) else {
+        return Ok(None);
+    };
+    let offset = doc.offset(pos.position, s.enc);
+    let Some((call, head)) = enclosing_call(doc, offset) else {
+        return Ok(None);
+    };
+    let tree = doc.tree();
+    let head_node = tree.node(head);
+    let a = doc.analysis();
+    let Some(occ) = a.occurrence_at(head_node.end) else {
+        return Ok(None);
+    };
+    if occ.target != crate::analysis::Target::Global {
+        return Ok(None);
+    }
+    let same = same_dialect(doc);
+    let mut defs: Vec<(&std::sync::Arc<FileSummary>, &Def)> = s
+        .index
+        .defs_named(&occ.key)
+        .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
+        .collect();
+    defs.sort_by_key(|(f, _)| f.uri != uri);
+    let name = tree.node_text(head);
+    let sigs: Vec<&Signature> = defs.iter().flat_map(|(_, d)| &d.signatures).collect();
+    if sigs.is_empty() {
+        return Ok(None);
+    }
+    let args = tree
+        .children(call)
+        .iter()
+        .skip(1)
+        .filter(|&&c| tree.node(c).end < offset)
+        .count();
+    let active_sig = sigs
+        .iter()
+        .position(|s| {
+            let (positional, rest) = param_slots(&doc.dialect, s);
+            args < positional.len() || rest.is_some()
+        })
+        .unwrap_or(0);
+    let docs = |i: usize| -> Option<String> {
+        let mut n = 0;
+        for (_, d) in &defs {
+            n += d.signatures.len();
+            if i < n {
+                return d.doc.clone();
+            }
+        }
+        None
+    };
+    let signatures = sigs
+        .iter()
+        .enumerate()
+        .map(|(i, sig)| {
+            let (label, offsets) = signature_label(name, sig);
+            let (positional, rest) = param_slots(&doc.dialect, sig);
+            let active = positional
+                .get(args)
+                .copied()
+                .or(rest)
+                .or(positional.last().copied());
+            SignatureInformation {
+                label,
+                documentation: docs(i).map(|d| {
                     Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
                         value: d,
                     })
                 }),
-                sort_text: Some(format!("{i:05}")),
-                filter_text: Some(c.label.clone()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(range, c.label))),
-                ..Default::default()
-            })
-            .collect();
-        Ok(Some(CompletionResponse::List(CompletionList {
-            is_incomplete: incomplete,
-            items,
-        })))
-    }
-
-    pub(crate) fn signature_help(
-        &mut self,
-        p: SignatureHelpParams,
-    ) -> HandlerResult<Option<SignatureHelp>> {
-        let pos = p.text_document_position_params;
-        let Some((uri, doc)) = self.document(&pos.text_document.uri) else {
-            return Ok(None);
-        };
-        let offset = doc.offset(pos.position, self.enc);
-        let Some((call, head)) = enclosing_call(doc, offset) else {
-            return Ok(None);
-        };
-        let tree = doc.tree();
-        let head_node = tree.node(head);
-        let a = doc.analysis();
-        let Some(occ) = a.occurrence_at(head_node.end) else {
-            return Ok(None);
-        };
-        if occ.target != crate::analysis::Target::Global {
-            return Ok(None);
-        }
-        let same = self.same_dialect(doc);
-        let mut defs: Vec<(&std::sync::Arc<FileSummary>, &Def)> = self
-            .index
-            .defs_named(&occ.key)
-            .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
-            .collect();
-        defs.sort_by_key(|(f, _)| f.uri != uri);
-        let name = tree.node_text(head);
-        let sigs: Vec<&Signature> = defs.iter().flat_map(|(_, d)| &d.signatures).collect();
-        if sigs.is_empty() {
-            return Ok(None);
-        }
-        let args = tree
-            .children(call)
-            .iter()
-            .skip(1)
-            .filter(|&&c| tree.node(c).end < offset)
-            .count();
-        let active_sig = sigs
-            .iter()
-            .position(|s| {
-                let (positional, rest) = param_slots(&doc.dialect, s);
-                args < positional.len() || rest.is_some()
-            })
-            .unwrap_or(0);
-        let docs = |i: usize| -> Option<String> {
-            let mut n = 0;
-            for (_, d) in &defs {
-                n += d.signatures.len();
-                if i < n {
-                    return d.doc.clone();
-                }
-            }
-            None
-        };
-        let signatures = sigs
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let (label, offsets) = signature_label(name, s);
-                let (positional, rest) = param_slots(&doc.dialect, s);
-                let active = positional
-                    .get(args)
-                    .copied()
-                    .or(rest)
-                    .or(positional.last().copied());
-                SignatureInformation {
-                    label,
-                    documentation: docs(i).map(|d| {
-                        Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: d,
+                parameters: Some(
+                    offsets
+                        .into_iter()
+                        .map(|(st, e)| ParameterInformation {
+                            label: ParameterLabel::LabelOffsets([st, e]),
+                            documentation: None,
                         })
-                    }),
-                    parameters: Some(
-                        offsets
-                            .into_iter()
-                            .map(|(s, e)| ParameterInformation {
-                                label: ParameterLabel::LabelOffsets([s, e]),
-                                documentation: None,
-                            })
-                            .collect(),
-                    ),
-                    active_parameter: active.map(|a| a as u32),
-                }
-            })
-            .collect();
-        let active_parameter = {
-            let (positional, rest) = param_slots(&doc.dialect, sigs[active_sig]);
-            positional
-                .get(args)
-                .copied()
-                .or(rest)
-                .or(positional.last().copied())
-        };
-        Ok(Some(SignatureHelp {
-            signatures,
-            active_signature: Some(active_sig as u32),
-            active_parameter: active_parameter.map(|a| a as u32),
-        }))
-    }
+                        .collect(),
+                ),
+                active_parameter: active.map(|a| a as u32),
+            }
+        })
+        .collect();
+    let active_parameter = {
+        let (positional, rest) = param_slots(&doc.dialect, sigs[active_sig]);
+        positional
+            .get(args)
+            .copied()
+            .or(rest)
+            .or(positional.last().copied())
+    };
+    Ok(Some(SignatureHelp {
+        signatures,
+        active_signature: Some(active_sig as u32),
+        active_parameter: active_parameter.map(|a| a as u32),
+    }))
+}
 
-    pub(crate) fn hover(&mut self, p: HoverParams) -> HandlerResult<Option<Hover>> {
-        let pos = p.text_document_position_params;
-        let Some((uri, doc)) = self.document(&pos.text_document.uri) else {
-            return Ok(None);
-        };
-        let Some((sym, occ)) = self.symbol_at(doc, pos.position) else {
-            return Ok(None);
-        };
-        let lang = doc
-            .dialect
-            .language_ids
-            .first()
-            .map_or(doc.dialect.name.as_str(), String::as_str);
-        let text = match sym {
-            Sym::Local(b) => {
-                let b = &doc.analysis().binders[b as usize];
-                format!("```{lang}\n{}\n```\nlocal binding", b.name)
+pub(crate) fn hover(s: &Session, p: HoverParams) -> FeatureResult<Option<Hover>> {
+    let pos = p.text_document_position_params;
+    let Some((uri, doc)) = s.document(&pos.text_document.uri) else {
+        return Ok(None);
+    };
+    let Some((sym, occ)) = s.symbol_at(doc, pos.position) else {
+        return Ok(None);
+    };
+    let lang = doc
+        .dialect
+        .language_ids
+        .first()
+        .map_or(doc.dialect.name.as_str(), String::as_str);
+    let text = match sym {
+        Sym::Local(b) => {
+            let b = &doc.analysis().binders[b as usize];
+            format!("```{lang}\n{}\n```\nlocal binding", b.name)
+        }
+        Sym::Global {
+            key,
+            explicit,
+            cell,
+            ..
+        } => {
+            let same = same_dialect(doc);
+            let mut defs: Vec<_> = s
+                .index
+                .defs_named(&key)
+                .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, cell))
+                .collect();
+            if let Some(q) = &explicit
+                && defs.iter().any(|(_, d)| d.namespace.as_ref() == Some(q))
+            {
+                defs.retain(|(_, d)| d.namespace.as_ref() == Some(q));
             }
-            Sym::Global {
-                key,
-                explicit,
-                cell,
-                ..
-            } => {
-                let same = self.same_dialect(doc);
-                let mut defs: Vec<_> = self
-                    .index
-                    .defs_named(&key)
-                    .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, cell))
-                    .collect();
-                if let Some(q) = &explicit
-                    && defs.iter().any(|(_, d)| d.namespace.as_ref() == Some(q))
-                {
-                    defs.retain(|(_, d)| d.namespace.as_ref() == Some(q));
-                }
-                defs.sort_by_key(|(f, d)| (f.uri != uri, d.start));
-                if defs.is_empty() {
-                    let d = &doc.dialect;
-                    let category = if d.is_special_form(&key) {
-                        "special form"
-                    } else if d.is_builtin(&key) {
-                        "builtin"
-                    } else {
-                        return Ok(None);
-                    };
-                    format!(
-                        "```{lang}\n{}\n```\n{category} ({})",
-                        occ_text(doc, occ.start, occ.end),
-                        d.name
-                    )
+            defs.sort_by_key(|(f, d)| (f.uri != uri, d.start));
+            if defs.is_empty() {
+                let d = &doc.dialect;
+                let category = if d.is_special_form(&key) {
+                    "special form"
+                } else if d.is_builtin(&key) {
+                    "builtin"
                 } else {
-                    defs.iter()
-                        .take(3)
-                        .map(|(f, d)| describe(lang, f, d))
-                        .collect::<Vec<_>>()
-                        .join("\n\n---\n\n")
-                }
+                    return Ok(None);
+                };
+                format!(
+                    "```{lang}\n{}\n```\n{category} ({})",
+                    occ_text(doc, occ.start, occ.end),
+                    d.name
+                )
+            } else {
+                defs.iter()
+                    .take(3)
+                    .map(|(f, d)| describe(lang, f, d))
+                    .collect::<Vec<_>>()
+                    .join("\n\n---\n\n")
             }
-        };
-        Ok(Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: text,
-            }),
-            range: Some(doc.range(occ.start, occ.end, self.enc)),
-        }))
-    }
+        }
+    };
+    Ok(Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: text,
+        }),
+        range: Some(doc.range(occ.start, occ.end, s.enc)),
+    }))
 }
 
 /// Requested cell for completion at `offset`: the analysis occurrence's cell for an

@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
-use crate::config::merge_tables;
+use crate::tables::merge_tables;
 
 const BUILTIN: &[(&str, &str)] = &[
     ("common-lisp", include_str!("../dialects/common-lisp.toml")),

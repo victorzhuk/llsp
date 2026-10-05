@@ -87,7 +87,7 @@ impl FileSummary {
             .into_iter()
             .flatten()
             .zip(&self.defs)
-            .filter_map(move |(name, d)| Some((crate::features::score_lowercase(query, name)?, d)))
+            .filter_map(move |(name, d)| Some((crate::search::score_lowercase(query, name)?, d)))
     }
 
     pub fn namespace_at(&self, offset: u32) -> Option<&str> {

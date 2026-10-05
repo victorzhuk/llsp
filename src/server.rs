@@ -20,20 +20,21 @@ use lsp_types::{
 use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
 
-use crate::config::{Layers, Settings, json_to_table};
+use crate::config::Layers;
 use crate::diagnostics::{self, Severity};
 use crate::dialect::Cell;
 use crate::document::{Document, Encoding, normalize_uri, uri_to_path};
+use crate::features::{
+    FeatureError, FeatureResult, assist, formatting, navigation, structure, symbols,
+};
+use crate::session::Session;
+use crate::tables::json_to_table;
 use crate::workspace::{self, FileSummary, Index};
 
 pub struct Server {
+    session: Session,
     conn: Connection,
     layers: Layers,
-    pub(crate) settings: Settings,
-    pub(crate) enc: Encoding,
-    roots: Vec<PathBuf>,
-    pub(crate) docs: FxHashMap<Uri, Document>,
-    pub(crate) index: Index,
     events: (Sender<Event>, Receiver<Event>),
     scan_generation: u64,
     watch_files: bool,
@@ -44,29 +45,6 @@ pub struct Server {
 enum Event {
     Indexed(u64, Vec<FileSummary>),
 }
-
-pub(crate) struct ResponseError {
-    code: i32,
-    message: String,
-}
-
-impl ResponseError {
-    pub(crate) fn invalid_params(message: impl Into<String>) -> Self {
-        Self {
-            code: ErrorCode::InvalidParams as i32,
-            message: message.into(),
-        }
-    }
-
-    pub(crate) fn request_failed(message: impl Into<String>) -> Self {
-        Self {
-            code: ErrorCode::RequestFailed as i32,
-            message: message.into(),
-        }
-    }
-}
-
-pub(crate) type HandlerResult<T> = std::result::Result<T, ResponseError>;
 
 /// Runs the protocol until `exit`. Returns whether `shutdown` was received first.
 pub fn run(conn: Connection, mut layers: Layers) -> Result<bool> {
@@ -111,13 +89,15 @@ pub fn run(conn: Connection, mut layers: Layers) -> Result<bool> {
         .and_then(|w| w.dynamic_registration)
         .unwrap_or(false);
     let mut server = Server {
+        session: Session {
+            settings,
+            enc,
+            roots: roots.iter().filter_map(|r| r.canonicalize().ok()).collect(),
+            docs: FxHashMap::default(),
+            index: Index::default(),
+        },
         conn,
         layers,
-        settings,
-        enc,
-        roots: roots.iter().filter_map(|r| r.canonicalize().ok()).collect(),
-        docs: FxHashMap::default(),
-        index: Index::default(),
         events: crossbeam_channel::unbounded(),
         scan_generation: 0,
         watch_files,
@@ -250,10 +230,10 @@ impl Server {
                     return;
                 }
                 log::info!("indexed {} files", files.len());
-                self.index = Index::default();
+                self.session.index = Index::default();
                 for f in files {
-                    if !self.docs.contains_key(&f.uri) {
-                        self.index.insert(f);
+                    if !self.session.docs.contains_key(&f.uri) {
+                        self.session.index.insert(f);
                     }
                 }
                 self.reindex_open_documents();
@@ -264,11 +244,11 @@ impl Server {
 
     fn start_scan(&mut self) {
         self.scan_generation += 1;
-        if !self.settings.config.workspace.index || self.roots.is_empty() {
+        if !self.session.settings.config.workspace.index || self.session.roots.is_empty() {
             return;
         }
-        let settings = self.settings.clone();
-        let roots = self.roots.clone();
+        let settings = self.session.settings.clone();
+        let roots = self.session.roots.clone();
         let sender = self.events.0.clone();
         let generation = self.scan_generation;
         std::thread::spawn(move || {
@@ -278,10 +258,11 @@ impl Server {
     }
 
     fn register_watchers(&mut self) {
-        if !self.watch_files || !self.settings.config.workspace.index {
+        if !self.watch_files || !self.session.settings.config.workspace.index {
             return;
         }
         let exts: Vec<&str> = self
+            .session
             .settings
             .dialects
             .iter()
@@ -309,41 +290,59 @@ impl Server {
         let Request { id, method, params } = req;
         let resp = match method.as_str() {
             req::DocumentSymbolRequest::METHOD => {
-                self.handle::<req::DocumentSymbolRequest>(id, params, Self::document_symbols)
+                self.handle::<req::DocumentSymbolRequest>(id, params, symbols::document_symbols)
             }
             req::WorkspaceSymbolRequest::METHOD => {
-                self.handle::<req::WorkspaceSymbolRequest>(id, params, Self::workspace_symbols)
+                self.handle::<req::WorkspaceSymbolRequest>(id, params, symbols::workspace_symbols)
             }
             req::GotoDefinition::METHOD => {
-                self.handle::<req::GotoDefinition>(id, params, Self::definition)
+                self.handle::<req::GotoDefinition>(id, params, navigation::definition)
             }
-            req::References::METHOD => self.handle::<req::References>(id, params, Self::references),
-            req::DocumentHighlightRequest::METHOD => {
-                self.handle::<req::DocumentHighlightRequest>(id, params, Self::document_highlight)
+            req::References::METHOD => {
+                self.handle::<req::References>(id, params, navigation::references)
             }
+            req::DocumentHighlightRequest::METHOD => self.handle::<req::DocumentHighlightRequest>(
+                id,
+                params,
+                navigation::document_highlight,
+            ),
             req::PrepareRenameRequest::METHOD => {
-                self.handle::<req::PrepareRenameRequest>(id, params, Self::prepare_rename)
+                self.handle::<req::PrepareRenameRequest>(id, params, navigation::prepare_rename)
             }
-            req::Rename::METHOD => self.handle::<req::Rename>(id, params, Self::rename),
-            req::Completion::METHOD => self.handle::<req::Completion>(id, params, Self::completion),
+            req::Rename::METHOD => self.handle::<req::Rename>(id, params, navigation::rename),
+            req::Completion::METHOD => {
+                self.handle::<req::Completion>(id, params, assist::completion)
+            }
             req::SignatureHelpRequest::METHOD => {
-                self.handle::<req::SignatureHelpRequest>(id, params, Self::signature_help)
+                self.handle::<req::SignatureHelpRequest>(id, params, assist::signature_help)
             }
-            req::HoverRequest::METHOD => self.handle::<req::HoverRequest>(id, params, Self::hover),
-            req::Formatting::METHOD => self.handle::<req::Formatting>(id, params, Self::formatting),
+            req::HoverRequest::METHOD => {
+                self.handle::<req::HoverRequest>(id, params, assist::hover)
+            }
+            req::Formatting::METHOD => {
+                self.handle::<req::Formatting>(id, params, formatting::formatting)
+            }
             req::RangeFormatting::METHOD => {
-                self.handle::<req::RangeFormatting>(id, params, Self::range_formatting)
+                self.handle::<req::RangeFormatting>(id, params, formatting::range_formatting)
             }
             req::FoldingRangeRequest::METHOD => {
-                self.handle::<req::FoldingRangeRequest>(id, params, Self::folding_ranges)
+                self.handle::<req::FoldingRangeRequest>(id, params, structure::folding_ranges)
             }
             req::SelectionRangeRequest::METHOD => {
-                self.handle::<req::SelectionRangeRequest>(id, params, Self::selection_ranges)
+                self.handle::<req::SelectionRangeRequest>(id, params, structure::selection_ranges)
             }
             req::SemanticTokensFullRequest::METHOD => self
-                .handle::<req::SemanticTokensFullRequest>(id, params, Self::semantic_tokens_full),
+                .handle::<req::SemanticTokensFullRequest>(
+                    id,
+                    params,
+                    structure::semantic_tokens_full,
+                ),
             req::SemanticTokensRangeRequest::METHOD => self
-                .handle::<req::SemanticTokensRangeRequest>(id, params, Self::semantic_tokens_range),
+                .handle::<req::SemanticTokensRangeRequest>(
+                    id,
+                    params,
+                    structure::semantic_tokens_range,
+                ),
             _ => Response::new_err(
                 id,
                 ErrorCode::MethodNotFound as i32,
@@ -357,7 +356,7 @@ impl Server {
         &mut self,
         id: RequestId,
         params: serde_json::Value,
-        f: impl FnOnce(&mut Self, R::Params) -> HandlerResult<R::Result>,
+        f: impl FnOnce(&Session, R::Params) -> FeatureResult<R::Result>,
     ) -> Response
     where
         R: req::Request,
@@ -371,9 +370,14 @@ impl Server {
         };
         // Request handlers only read state, so recovering is safe; sync notifications are
         // not wrapped because a panic mid-edit would leave the document silently wrong.
-        match catch_unwind(AssertUnwindSafe(|| f(self, params))) {
+        match catch_unwind(AssertUnwindSafe(|| f(&self.session, params))) {
             Ok(Ok(result)) => Response::new_ok(id, result),
-            Ok(Err(e)) => Response::new_err(id, e.code, e.message),
+            Ok(Err(FeatureError::Invalid(message))) => {
+                Response::new_err(id, ErrorCode::InvalidParams as i32, message)
+            }
+            Ok(Err(FeatureError::Failed(message))) => {
+                Response::new_err(id, ErrorCode::RequestFailed as i32, message)
+            }
             Err(panic) => {
                 let message = format!("{} panicked: {}", R::METHOD, panic_message(&*panic));
                 log::error!("{message}");
@@ -470,7 +474,7 @@ impl Server {
             "llsp: {} is {} bytes, over files.max_file_size ({}); analysis disabled",
             doc.client_uri.as_str(),
             doc.text().len(),
-            self.settings.config.files.max_file_size
+            self.session.settings.config.files.max_file_size
         ));
     }
 
@@ -479,28 +483,29 @@ impl Server {
         let uri = normalize_uri(&doc.uri);
         let path = uri_to_path(&uri);
         let language_id = Some(doc.language_id);
-        let dialect = self
-            .settings
-            .detect(path.as_deref(), language_id.as_deref(), &doc.text);
-        let max = self.settings.config.files.max_file_size;
+        let dialect =
+            self.session
+                .settings
+                .detect(path.as_deref(), language_id.as_deref(), &doc.text);
+        let max = self.session.settings.config.files.max_file_size;
         let document = Document::new(doc.uri, doc.text, doc.version, language_id, dialect, max);
         if document.oversized() {
             self.warn_oversized(&document);
         }
-        self.docs.insert(uri.clone(), document);
+        self.session.docs.insert(uri.clone(), document);
         self.document_changed(&uri);
     }
 
     fn did_change(&mut self, p: lsp_types::DidChangeTextDocumentParams) {
         let uri = normalize_uri(&p.text_document.uri);
-        let Some(doc) = self.docs.get_mut(&uri) else {
+        let Some(doc) = self.session.docs.get_mut(&uri) else {
             log::warn!("change for unopened document {}", uri.as_str());
             return;
         };
         let was_oversized = doc.oversized();
-        doc.apply_changes(p.content_changes, p.text_document.version, self.enc);
+        doc.apply_changes(p.content_changes, p.text_document.version, self.session.enc);
         if doc.oversized() && !was_oversized {
-            let doc = &self.docs[&uri];
+            let doc = &self.session.docs[&uri];
             self.warn_oversized(doc);
         }
         self.document_changed(&uri);
@@ -508,14 +513,14 @@ impl Server {
 
     fn did_close(&mut self, p: lsp_types::DidCloseTextDocumentParams) {
         let uri = normalize_uri(&p.text_document.uri);
-        self.docs.remove(&uri);
+        self.session.docs.remove(&uri);
         self.pending.remove(&uri);
-        self.index.remove(&uri);
+        self.session.index.remove(&uri);
         if let Some(path) = uri_to_path(&uri)
-            && workspace::is_inside(&self.roots, &path)
-            && let Some(summary) = workspace::summarize(&self.settings, &path)
+            && workspace::is_inside(&self.session.roots, &path)
+            && let Some(summary) = workspace::summarize(&self.session.settings, &path)
         {
-            self.index.insert(summary);
+            self.session.index.insert(summary);
         }
         self.send_notification::<notif::PublishDiagnostics>(PublishDiagnosticsParams {
             uri: p.text_document.uri,
@@ -527,23 +532,23 @@ impl Server {
     fn did_change_watched_files(&mut self, p: lsp_types::DidChangeWatchedFilesParams) {
         for change in p.changes {
             let uri = normalize_uri(&change.uri);
-            if self.docs.contains_key(&uri) {
+            if self.session.docs.contains_key(&uri) {
                 continue;
             }
             let Some(path) = uri_to_path(&uri) else {
                 continue;
             };
             if change.typ == FileChangeType::DELETED {
-                self.index.remove(&uri);
+                self.session.index.remove(&uri);
                 continue;
             }
-            if !workspace::is_inside(&self.roots, &path) {
+            if !workspace::is_inside(&self.session.roots, &path) {
                 log::debug!("ignoring watched file outside roots: {}", path.display());
                 continue;
             }
-            match workspace::summarize(&self.settings, &path) {
-                Some(s) => self.index.insert(s),
-                None => self.index.remove(&uri),
+            match workspace::summarize(&self.session.settings, &path) {
+                Some(s) => self.session.index.insert(s),
+                None => self.session.index.remove(&uri),
             }
         }
     }
@@ -563,10 +568,10 @@ impl Server {
         match resolved {
             Ok(settings) => {
                 self.layers = layers;
-                self.settings = settings;
+                self.session.settings = settings;
                 self.reload_documents();
-                if !self.settings.config.workspace.index {
-                    self.index = Index::default();
+                if !self.session.settings.config.workspace.index {
+                    self.session.index = Index::default();
                 }
                 self.reindex_open_documents();
                 self.publish_open_documents();
@@ -577,14 +582,16 @@ impl Server {
     }
 
     fn reload_documents(&mut self) {
-        let uris: Vec<Uri> = self.docs.keys().cloned().collect();
+        let uris: Vec<Uri> = self.session.docs.keys().cloned().collect();
         for uri in uris {
-            let doc = &self.docs[&uri];
+            let doc = &self.session.docs[&uri];
             let path = uri_to_path(&uri);
-            let dialect =
-                self.settings
-                    .detect(path.as_deref(), doc.language_id.as_deref(), doc.text());
-            let max = self.settings.config.files.max_file_size;
+            let dialect = self.session.settings.detect(
+                path.as_deref(),
+                doc.language_id.as_deref(),
+                doc.text(),
+            );
+            let max = self.session.settings.config.files.max_file_size;
             let fresh = Document::new(
                 doc.client_uri.clone(),
                 doc.text().to_owned(),
@@ -593,19 +600,19 @@ impl Server {
                 dialect,
                 max,
             );
-            self.docs.insert(uri, fresh);
+            self.session.docs.insert(uri, fresh);
         }
     }
 
     fn publish_open_documents(&self) {
-        for uri in self.docs.keys() {
+        for uri in self.session.docs.keys() {
             self.publish_diagnostics(uri);
         }
     }
 
     fn reindex_open_documents(&mut self) {
-        for (uri, doc) in &self.docs {
-            self.index.insert(FileSummary::new(
+        for (uri, doc) in &self.session.docs {
+            self.session.index.insert(FileSummary::new(
                 uri.clone(),
                 doc.dialect.clone(),
                 doc.tree(),
@@ -615,16 +622,16 @@ impl Server {
     }
 
     fn document_changed(&mut self, uri: &Uri) {
-        let Some(doc) = self.docs.get(uri) else {
+        let Some(doc) = self.session.docs.get(uri) else {
             return;
         };
-        self.index.insert(FileSummary::new(
+        self.session.index.insert(FileSummary::new(
             uri.clone(),
             doc.dialect.clone(),
             doc.tree(),
             doc.analysis(),
         ));
-        match self.settings.config.diagnostics.debounce_ms {
+        match self.session.settings.config.diagnostics.debounce_ms {
             0 => self.publish_diagnostics(uri),
             ms => {
                 self.pending
@@ -648,12 +655,13 @@ impl Server {
     }
 
     fn publish_diagnostics(&self, uri: &Uri) {
-        let Some(doc) = self.docs.get(uri) else {
+        let Some(doc) = self.session.docs.get(uri) else {
             return;
         };
         let same = |f: &FileSummary| f.dialect.name == doc.dialect.name;
         let is_defined = |key: &str| {
-            self.index
+            self.session
+                .index
                 .defs_named(key)
                 .any(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
         };
@@ -661,13 +669,13 @@ impl Server {
             doc.tree(),
             doc.analysis(),
             &doc.dialect,
-            &self.settings.config.diagnostics,
+            &self.session.settings.config.diagnostics,
             is_defined,
         );
         let diagnostics = found
             .into_iter()
             .map(|d| lsp_types::Diagnostic {
-                range: doc.range(d.start, d.end, self.enc),
+                range: doc.range(d.start, d.end, self.session.enc),
                 severity: Some(match d.severity {
                     Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
                     Severity::Warning => lsp_types::DiagnosticSeverity::WARNING,
@@ -708,13 +716,15 @@ mod tests {
         let (conn, client) = Connection::memory();
         let settings = Layers::default().resolve().unwrap();
         let s = Server {
+            session: Session {
+                settings,
+                enc: Encoding::Utf16,
+                roots: vec![root.canonicalize().unwrap()],
+                docs: FxHashMap::default(),
+                index: Index::default(),
+            },
             conn,
             layers: Layers::default(),
-            settings,
-            enc: Encoding::Utf16,
-            roots: vec![root.canonicalize().unwrap()],
-            docs: FxHashMap::default(),
-            index: Index::default(),
             events: crossbeam_channel::unbounded(),
             scan_generation: 0,
             watch_files: false,
@@ -742,7 +752,8 @@ mod tests {
     }
 
     fn def_names(s: &Server, uri: &Uri) -> Vec<String> {
-        s.index
+        s.session
+            .index
             .get(uri)
             .unwrap()
             .defs
@@ -802,11 +813,11 @@ mod tests {
             ],
         });
         assert_eq!(def_names(&s, &uri), ["f"]);
-        assert!(s.index.get(&out_uri).is_none());
+        assert!(s.session.index.get(&out_uri).is_none());
         s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {
             changes: vec![event(uri.clone(), FileChangeType::DELETED)],
         });
-        assert!(s.index.is_empty());
+        assert!(s.session.index.is_empty());
     }
 
     #[test]
@@ -822,13 +833,13 @@ mod tests {
         s.did_change_configuration(lsp_types::DidChangeConfigurationParams {
             settings: serde_json::json!({"format": {"body_indent": 3}}),
         });
-        assert_eq!(s.index.defs_named("helper").count(), 1);
+        assert_eq!(s.session.index.defs_named("helper").count(), 1);
 
         let ev = s.events.1.recv().unwrap();
         s.on_event(ev);
-        assert_eq!(s.index.defs_named("helper").count(), 1);
+        assert_eq!(s.session.index.defs_named("helper").count(), 1);
         assert_eq!(
-            s.index.defs_named("gone").count(),
+            s.session.index.defs_named("gone").count(),
             0,
             "rescan drops stale files"
         );
@@ -873,7 +884,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.lisp"), "(defun a ())").unwrap();
         let (mut s, _client) = server(dir.path());
-        s.settings = Layers {
+        s.session.settings = Layers {
             cli: toml::from_str("[workspace]\nindex = false").unwrap(),
             ..Layers::default()
         }
