@@ -52,13 +52,7 @@ fn global_definitions(
     qualifier: Option<&str>,
     cell: Cell,
 ) -> Vec<Location> {
-    let same = same_dialect(doc);
-    let cells = &doc.dialect;
-    let mut defs: Vec<_> = s
-        .index
-        .defs_named(key)
-        .filter(|(f, d)| same(f) && cells.cells_match(d.cell, cell))
-        .collect();
+    let mut defs: Vec<_> = s.index.defs_in(key, &doc.dialect, cell).collect();
     if let Some(q) = qualifier
         && defs.iter().any(|(_, d)| d.namespace.as_deref() == Some(q))
     {

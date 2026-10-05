@@ -386,3 +386,53 @@ fn format_unreadable_files_exit_two() {
         "(defun f ()\n(g))\n"
     );
 }
+
+#[test]
+fn format_resolves_workspace_indent_hints() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("macros.el"),
+        "(defmacro my-block (name &rest body) (declare (indent 1)) body)",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("a.el"), "(my-block x\nbody)\n").unwrap();
+    // Formatting the whole directory lets hints cross files, like the server's
+    // workspace index does.
+    let out = llsp(dir.path(), &["format", ".", "--format", "text"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.el")).unwrap(),
+        // Same edit textDocument/formatting returns for the same workspace.
+        "(my-block x\n  body)\n"
+    );
+}
+
+#[test]
+fn format_check_applies_one_file_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    for (d, n) in [("dir1", 8), ("dir2", 20)] {
+        for i in 0..n {
+            std::fs::create_dir_all(dir.path().join(d)).unwrap();
+            std::fs::write(
+                dir.path().join(d).join(format!("f{i}.lisp")),
+                "(defun f ()\ng)\n",
+            )
+            .unwrap();
+        }
+    }
+    let out = llsp(
+        dir.path(),
+        &[
+            "format",
+            "--check",
+            "dir1",
+            "dir2",
+            "--set",
+            "workspace.max_files=10",
+        ],
+    );
+    // Every file needs re-indenting, so the report lists exactly the budget.
+    assert_eq!(json(&out).as_array().unwrap().len(), 10);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.matches("workspace.max_files").count(), 1, "{stderr}");
+}

@@ -177,11 +177,9 @@ pub(crate) fn signature_help(
     if occ.target != crate::analysis::Target::Global {
         return Ok(None);
     }
-    let same = same_dialect(doc);
     let mut defs: Vec<(&std::sync::Arc<FileSummary>, &Def)> = s
         .index
-        .defs_named(&occ.key)
-        .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
+        .defs_in(&occ.key, &doc.dialect, Cell::Function)
         .collect();
     defs.sort_by_key(|(f, _)| f.uri != uri);
     let name = tree.node_text(head);
@@ -283,12 +281,7 @@ pub(crate) fn hover(s: &Session, p: HoverParams) -> FeatureResult<Option<Hover>>
             cell,
             ..
         } => {
-            let same = same_dialect(doc);
-            let mut defs: Vec<_> = s
-                .index
-                .defs_named(&key)
-                .filter(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, cell))
-                .collect();
+            let mut defs: Vec<_> = s.index.defs_in(&key, &doc.dialect, cell).collect();
             if let Some(q) = &explicit
                 && defs.iter().any(|(_, d)| d.namespace.as_ref() == Some(q))
             {

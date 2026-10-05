@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `llsp format` now resolves `(declare (indent N))` hints across all files it processes,
+  matching what the editor's formatting produces for the same workspace, instead of
+  seeing only the file being formatted.
+- `check` and `format` apply one `workspace.max_files` budget across all directory
+  arguments (previously one per directory), with a single truncation warning.
 - Hostile configuration can no longer abort the server: `extends` chains are depth- and
   count-bounded, numeric settings (`diagnostics.debounce_ms`, `format.body_indent`,
   `format.distinguished_indent`) have documented maxima, and formatter indentation is

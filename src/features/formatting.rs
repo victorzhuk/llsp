@@ -30,13 +30,7 @@ pub(crate) fn range_formatting(
 }
 
 fn format_edits(s: &Session, doc: &Document, lines: Option<(u32, u32)>) -> Vec<TextEdit> {
-    let name = &doc.dialect.name;
-    let hints = |key: &str| {
-        s.index
-            .defs_named(key)
-            .filter(|(f, _)| &f.dialect.name == name)
-            .find_map(|(_, d)| d.indent)
-    };
+    let hints = crate::workspace::indent_hints(&s.index, &doc.dialect);
     format::format(
         doc.tree(),
         &doc.dialect,

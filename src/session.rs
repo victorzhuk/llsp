@@ -77,12 +77,9 @@ impl Session {
         key: &'a str,
         cell: Cell,
     ) -> Vec<Option<&'a str>> {
-        let same = |f: &FileSummary| f.dialect.name == doc.dialect.name;
-        let cells = &doc.dialect;
         let mut v: Vec<Option<&str>> = self
             .index
-            .defs_named(key)
-            .filter(|(f, d)| same(f) && cells.cells_match(d.cell, cell))
+            .defs_in(key, &doc.dialect, cell)
             .map(|(_, d)| d.namespace.as_deref())
             .collect();
         v.sort_unstable();

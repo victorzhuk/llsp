@@ -168,6 +168,19 @@ impl Index {
             .flat_map(move |f| f.defs_named(key).map(move |d| (f, d)))
     }
 
+    /// Definitions named `key` in files of `dialect`, whose cell satisfies `cell`.
+    /// The one definition filter every feature and both front ends share.
+    pub fn defs_in<'a>(
+        &'a self,
+        key: &'a str,
+        dialect: &'a Dialect,
+        cell: Cell,
+    ) -> impl Iterator<Item = (&'a Arc<FileSummary>, &'a Def)> + 'a {
+        self.defs_named(key).filter(move |(f, d)| {
+            f.dialect.name == dialect.name && dialect.cells_match(d.cell, cell)
+        })
+    }
+
     pub fn refs_named<'a>(
         &'a self,
         key: &'a str,
@@ -178,9 +191,9 @@ impl Index {
     }
 }
 
-/// Lists indexable files under `roots`: known extensions, gitignore and excludes honored,
-/// symlinks not followed, at most `workspace.max_files`.
-pub fn discover(settings: &Settings, roots: &[PathBuf]) -> (Vec<PathBuf>, bool) {
+/// Walks `roots` for files whose dialect is known, honoring excludes and
+/// `.gitignore`, up to `max_files` files in total across all roots.
+pub fn discover(settings: &Settings, roots: &[PathBuf], max_files: usize) -> (Vec<PathBuf>, bool) {
     let cfg = &settings.config;
     let mut excludes = globset::GlobSetBuilder::new();
     for g in &cfg.workspace.exclude {
@@ -214,7 +227,7 @@ pub fn discover(settings: &Settings, roots: &[PathBuf]) -> (Vec<PathBuf>, bool) 
             if !known {
                 continue;
             }
-            if out.len() >= cfg.workspace.max_files {
+            if out.len() >= max_files {
                 truncated = true;
                 break 'roots;
             }
@@ -236,7 +249,7 @@ pub fn summarize(settings: &Settings, path: &Path) -> Option<FileSummary> {
 }
 
 pub fn scan(settings: &Settings, roots: &[PathBuf]) -> Vec<FileSummary> {
-    let (files, truncated) = discover(settings, roots);
+    let (files, truncated) = discover(settings, roots, settings.config.workspace.max_files);
     if truncated {
         log::warn!(
             "workspace has more than {} lisp files; indexing the first {}",
@@ -256,6 +269,21 @@ pub fn is_inside(roots: &[PathBuf], path: &Path) -> bool {
         return false;
     };
     roots.iter().any(|r| real.starts_with(r))
+}
+
+/// Declared indent hints for `dialect`, resolved across the whole index. Both
+/// front ends — `llsp format` and `textDocument/formatting` — use this lookup so
+/// they produce the same edits for the same workspace.
+pub fn indent_hints<'a>(
+    index: &'a Index,
+    dialect: &'a Dialect,
+) -> impl Fn(&str) -> Option<u32> + 'a {
+    move |key| {
+        index
+            .defs_named(key)
+            .filter(|(f, _)| f.dialect.name == dialect.name)
+            .find_map(|(_, d)| d.indent)
+    }
 }
 
 #[cfg(test)]
@@ -302,7 +330,7 @@ mod tests {
         write(root, "ignored/x.lisp", "");
         write(root, ".gitignore", "ignored/\n");
         write(root, "notes.txt", "");
-        let (files, truncated) = discover(&settings(""), &[root.to_path_buf()]);
+        let (files, truncated) = discover(&settings(""), &[root.to_path_buf()], usize::MAX);
         assert_eq!(names(&files, root), ["src/a.lisp", "src/b.clj"]);
         assert!(!truncated);
     }
@@ -314,7 +342,11 @@ mod tests {
             write(dir.path(), &format!("f{i}.scm"), "(define x 1)");
         }
         let s = settings("[workspace]\nmax_files = 3");
-        let (files, truncated) = discover(&s, &[dir.path().to_path_buf()]);
+        let (files, truncated) = discover(
+            &s,
+            &[dir.path().to_path_buf()],
+            s.config.workspace.max_files,
+        );
         assert_eq!(files.len(), 3);
         assert!(truncated);
     }
@@ -333,7 +365,7 @@ mod tests {
         )
         .unwrap();
         let s = settings("");
-        let (files, _) = discover(&s, &[dir.path().to_path_buf()]);
+        let (files, _) = discover(&s, &[dir.path().to_path_buf()], usize::MAX);
         let summaries: Vec<_> = files.iter().filter_map(|p| summarize(&s, p)).collect();
         assert_eq!(summaries.len(), 1, "{files:?}");
         let root = dir.path().canonicalize().unwrap();

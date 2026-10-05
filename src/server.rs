@@ -658,12 +658,12 @@ impl Server {
         let Some(doc) = self.session.docs.get(uri) else {
             return;
         };
-        let same = |f: &FileSummary| f.dialect.name == doc.dialect.name;
         let is_defined = |key: &str| {
             self.session
                 .index
-                .defs_named(key)
-                .any(|(f, d)| same(f) && doc.dialect.cells_match(d.cell, Cell::Function))
+                .defs_in(key, &doc.dialect, Cell::Function)
+                .next()
+                .is_some()
         };
         let found = diagnostics::check(
             doc.tree(),

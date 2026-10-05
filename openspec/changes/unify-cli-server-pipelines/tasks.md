@@ -2,25 +2,28 @@
 
 ## 1. Shared lookup
 
-- [ ] 1.1 Add `Index::defs_in(&self, key, dialect_name, dialect, cell)` returning
-      same-dialect, cell-matching definitions; replace the hand-written filter at the eight
-      call sites (`src/main.rs:236-240`, `src/server.rs:624-629`,
-      `src/features/mod.rs:110-117`, `src/features/navigation.rs:57-66,111-118`,
-      `src/features/assist.rs:186-190,291-300`, `src/features/structure.rs:319-324`); verify
+- [x] 1.1 Add `Index::defs_in(key, dialect, cell)` returning same-dialect, cell-matching
+      definitions; replaced the hand-written filter at the resolution sites (`src/main.rs`
+      check, `src/server.rs` publish_diagnostics, `session::defined_namespaces`,
+      `navigation::global_definitions`, `assist` signature help and hover); the per-file
+      declaration filter in `references` and the cell-free kind lookup in
+      `structure::classify` keep their own (different) predicates on purpose; verify
       `task test` green and `grep -rn "defs_named" src/` shows no caller repeating the
       dialect/cell predicate
 
 ## 2. Format parity
 
-- [ ] 2.1 Add a shared hints helper (e.g. `workspace::indent_hints(index, dialect)`) used by
-      both `format_edits` (`src/features/formatting.rs:33-38`) and `format_files`; verify a
-      two-file test where `a.lisp` declares `(declare (indent 1))` and `b.lisp` uses the
-      macro: `textDocument/formatting` and `llsp format b.lisp` produce the same
-      `body_indent` indentation
+- [x] 2.1 Shared `workspace::indent_hints(index, dialect)` used by both `format_edits`
+      (`src/features/formatting.rs`) and `format_files`; `format_files` builds an `Index`
+      over all collected files (as `check` does) and reuses it; verify the two-file test
+      `format_resolves_workspace_indent_hints`: `llsp format .` produces the same
+      `body_indent` indentation `textDocument/formatting` returns (`tests/formatting.rs`
+      keeps covering the LSP side)
 
 ## 3. File budget
 
-- [ ] 3.1 Make `collect_files` accumulate all path arguments under one
-      `workspace.max_files` budget with one truncation warning; verify a test with two
-      directories totalling more than `max_files` processes exactly `max_files` files and
-      prints one warning
+- [x] 3.1 `collect_files` accumulates all directory arguments under one
+      `workspace.max_files` budget (explicitly named files are always processed) with one
+      truncation warning; `workspace::discover` takes the budget explicitly; verify
+      `format_check_applies_one_file_budget` processes exactly `max_files` files across two
+      directories and prints one warning

@@ -251,11 +251,7 @@ fn check(settings: &Settings, paths: &[PathBuf], json: bool) -> Result<ExitCode>
 
     let mut reports = Vec::new();
     for (path, dialect, tree, analysis) in &files {
-        let is_defined = |key: &str| {
-            index.defs_named(key).any(|(f, d)| {
-                f.dialect.name == dialect.name && dialect.cells_match(d.cell, Cell::Function)
-            })
-        };
+        let is_defined = |key: &str| index.defs_in(key, dialect, Cell::Function).next().is_some();
         let lines = line_index::LineIndex::new(tree.text());
         let found = diagnostics::check(
             tree,
@@ -313,10 +309,15 @@ fn format_files(
     check: bool,
     json: bool,
 ) -> Result<ExitCode> {
+    let files = collect_files(settings, paths);
     let mut changed = Vec::new();
     let mut io_error = false;
-    for path in collect_files(settings, paths) {
-        let text = match read_limited(&path, settings.config.files.max_file_size) {
+    // Hints resolve across every file being formatted, like the server resolves
+    // them across the workspace, so both front ends produce the same edits.
+    let mut index = Index::default();
+    let mut parsed: Vec<(PathBuf, _, Tree)> = Vec::with_capacity(files.len());
+    for path in &files {
+        let text = match read_limited(path, settings.config.files.max_file_size) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("llsp: {}: {e:#}", path.display());
@@ -324,23 +325,23 @@ fn format_files(
                 continue;
             }
         };
-        let dialect = settings.detect(Some(&path), None, &text);
+        let dialect = settings.detect(Some(path), None, &text);
         let tree = Tree::parse(text, &dialect);
         let analysis = Analysis::new(&tree, &dialect);
-        let hints = |key: &str| {
-            analysis
-                .defs
-                .iter()
-                .filter(|d| d.key == key)
-                .find_map(|d| d.indent)
-        };
-        let edits = llsp::format::format(&tree, &dialect, &settings.config.format, &hints, None);
+        if let Some(uri) = path_to_uri(path) {
+            index.insert(FileSummary::new(uri, dialect.clone(), &tree, &analysis));
+        }
+        parsed.push((path.clone(), dialect, tree));
+    }
+    for (path, dialect, tree) in &parsed {
+        let hints = workspace::indent_hints(&index, dialect);
+        let edits = llsp::format::format(tree, dialect, &settings.config.format, &hints, None);
         if edits.is_empty() {
             continue;
         }
         if !check {
             let out = llsp::format::apply(tree.text(), &edits);
-            if let Err(e) = std::fs::write(&path, out) {
+            if let Err(e) = std::fs::write(path, out) {
                 eprintln!("llsp: {}: {e}", path.display());
                 io_error = true;
                 continue;
@@ -364,23 +365,34 @@ fn format_files(
     })
 }
 
+/// One `workspace.max_files` budget across all path arguments, like the server's
+/// scan; bare files always count against it.
 fn collect_files(settings: &Settings, paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    let mut truncated = false;
+    let max = settings.config.workspace.max_files;
     for path in paths {
         if !path.is_dir() {
             out.push(path.clone());
             continue;
         }
-        let (files, truncated) = workspace::discover(settings, std::slice::from_ref(path));
-        if truncated {
-            eprintln!(
-                "llsp: {}: over workspace.max_files ({}); only the first {} files are processed",
-                path.display(),
-                settings.config.workspace.max_files,
-                files.len()
-            );
-        }
+        let (files, t) = workspace::discover(
+            settings,
+            std::slice::from_ref(path),
+            max.saturating_sub(out.len()),
+        );
+        truncated |= t;
         out.extend(files);
+        if out.len() >= max {
+            break;
+        }
+    }
+    if truncated {
+        eprintln!(
+            "llsp: over workspace.max_files ({}); only the first {} files are processed",
+            max,
+            out.len()
+        );
     }
     out.sort();
     out.dedup();
