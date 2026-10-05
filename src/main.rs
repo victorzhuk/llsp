@@ -164,6 +164,17 @@ fn init_logging(settings: &Settings, level: Option<&str>, file: Option<&Path>) -
     builder.parse_filters(level);
     let file = file.or(settings.config.log.file.as_deref());
     if let Some(path) = file {
+        #[cfg(unix)]
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                bail!("log file {} is a symbolic link", path.display());
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| format!("stat log file {}", path.display()));
+            }
+        }
         let mut opts = std::fs::OpenOptions::new();
         opts.create(true).append(true);
         #[cfg(unix)]
@@ -171,6 +182,13 @@ fn init_logging(settings: &Settings, level: Option<&str>, file: Option<&Path>) -
         let f = opts
             .open(path)
             .with_context(|| format!("open log file {}", path.display()))?;
+        // `mode` only applies at creation; normalize pre-existing files too.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("chmod log file {}", path.display()))?;
+        }
         builder.target(env_logger::Target::Pipe(Box::new(f)));
     }
     builder.try_init().ok();

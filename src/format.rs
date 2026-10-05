@@ -67,7 +67,7 @@ impl Formatter<'_> {
                 let target = if fs == le {
                     0
                 } else {
-                    self.indent_for(fs, &shift)
+                    (self.indent_for(fs, &shift) as u32).min(crate::config::MAX_INDENT) as usize
                 };
                 shift[l] = target as i64 - ws as i64;
                 if line[..ws] != " ".repeat(target) {
@@ -294,6 +294,20 @@ mod tests {
                 end: 14,
                 text: "  ".into()
             }]
+        );
+    }
+
+    #[test]
+    fn deep_nesting_stays_bounded() {
+        let ds = Dialects::builtin();
+        let d = ds.get("common-lisp").unwrap();
+        let src = "(\n".repeat(10_000);
+        let t = Tree::parse(src.clone(), d);
+        let edits = format(&t, d, &Format::default(), &|_| None, None);
+        let total: usize = edits.iter().map(|e| e.text.len()).sum();
+        assert!(
+            total <= 10_000 * crate::config::MAX_INDENT as usize,
+            "edit text {total} is unbounded"
         );
     }
 

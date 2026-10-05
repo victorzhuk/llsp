@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Hostile configuration can no longer abort the server: `extends` chains are depth- and
+  count-bounded, numeric settings (`diagnostics.debounce_ms`, `format.body_indent`,
+  `format.distinguished_indent`) have documented maxima, and formatter indentation is
+  clamped.
+- `didChangeConfiguration`, `didChangeWatchedFiles` and `didClose` notifications are
+  panic-isolated: a panic in one is logged and the server keeps running.
+- Signature labels compute parameter offsets in one pass and cap collected parameters,
+  so definitions with pathological parameter lists no longer stall hover and signature
+  help.
+- Log files keep mode 0600 when they already exist, and a symlinked log path is refused
+  instead of being written through.
+
 ## [0.2.1] - 2026-09-30
 
 ### Fixed

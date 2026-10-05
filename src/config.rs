@@ -9,6 +9,9 @@ use crate::dialect::Dialects;
 pub const PROJECT_FILE: &str = ".llsp.toml";
 const ENV_PREFIX: &str = "LLSP_";
 const RESERVED_ENV: &[&str] = &["LLSP_CONFIG", "LLSP_LOG"];
+/// Upper bounds for settings whose values feed allocation sizes or timers.
+pub const MAX_DEBOUNCE_MS: u64 = 60_000;
+pub const MAX_INDENT: u32 = 1000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -241,6 +244,23 @@ impl Settings {
         let config: Config = table
             .try_into()
             .map_err(|e| anyhow::anyhow!("config: {e}"))?;
+        if config.diagnostics.debounce_ms > MAX_DEBOUNCE_MS {
+            bail!(
+                "diagnostics.debounce_ms: {} exceeds the maximum of {MAX_DEBOUNCE_MS}",
+                config.diagnostics.debounce_ms
+            );
+        }
+        for (key, value) in [
+            ("format.body_indent", config.format.body_indent),
+            (
+                "format.distinguished_indent",
+                config.format.distinguished_indent,
+            ),
+        ] {
+            if value > MAX_INDENT {
+                bail!("{key}: {value} exceeds the maximum of {MAX_INDENT}");
+            }
+        }
         let dialects = Dialects::load(&config.dialects)?;
         let mut associations = Vec::new();
         for (glob, name) in &config.files.associations {
@@ -408,6 +428,28 @@ mod tests {
     fn wrong_type_is_named() {
         let err = Settings::from_table(table("[format]\nbody_indent = \"x\"")).unwrap_err();
         assert!(format!("{err:#}").contains("body_indent"), "{err:#}");
+    }
+
+    #[test]
+    fn numeric_bounds_are_enforced() {
+        let err = Settings::from_table(table("[diagnostics]\ndebounce_ms = 9223372036854775807"))
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("debounce_ms"), "{err:#}");
+        let err = Settings::from_table(table("[format]\nbody_indent = 4000000000")).unwrap_err();
+        assert!(format!("{err:#}").contains("body_indent"), "{err:#}");
+        let err = Settings::from_table(table("[format]\ndistinguished_indent = 1001")).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("distinguished_indent"),
+            "{err:#}"
+        );
+        let s = Settings::from_table(table(
+            "[diagnostics]\ndebounce_ms = 60000\n[format]\nbody_indent = 1000",
+        ))
+        .unwrap();
+        assert_eq!(s.config.diagnostics.debounce_ms, 60_000);
+        assert_eq!(s.config.format.body_indent, 1000);
+        let s = Settings::from_table(table("[diagnostics]\ndebounce_ms = 0")).unwrap();
+        assert_eq!(s.config.diagnostics.debounce_ms, 0);
     }
 
     #[test]

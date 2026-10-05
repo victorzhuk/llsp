@@ -439,15 +439,18 @@ fn describe(lang: &str, f: &FileSummary, d: &Def) -> String {
     out
 }
 
-/// `(name p1 p2)` plus the byte offsets of each parameter within it.
+/// `(name p1 p2)` plus the UTF-16 offsets of each parameter within it.
 fn signature_label(name: &str, s: &Signature) -> (String, Vec<(u32, u32)>) {
     let mut label = format!("({name}");
+    let mut utf16 = label.encode_utf16().count() as u32;
     let mut offsets = Vec::with_capacity(s.params.len());
     for p in &s.params {
         label.push(' ');
-        let start = label.encode_utf16().count() as u32;
+        utf16 += 1;
+        let start = utf16;
+        utf16 += p.encode_utf16().count() as u32;
         label.push_str(p);
-        offsets.push((start, label.encode_utf16().count() as u32));
+        offsets.push((start, utf16));
     }
     label.push(')');
     (label, offsets)

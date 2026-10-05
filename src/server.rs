@@ -392,13 +392,22 @@ impl Server {
                 self.notify::<notif::DidChangeTextDocument>(n, Self::did_change)
             }
             notif::DidCloseTextDocument::METHOD => {
-                self.notify::<notif::DidCloseTextDocument>(n, Self::did_close)
+                self.notify_isolated::<notif::DidCloseTextDocument>(n, Self::did_close);
+                Ok(())
             }
             notif::DidChangeConfiguration::METHOD => {
-                self.notify::<notif::DidChangeConfiguration>(n, Self::did_change_configuration)
+                self.notify_isolated::<notif::DidChangeConfiguration>(
+                    n,
+                    Self::did_change_configuration,
+                );
+                Ok(())
             }
             notif::DidChangeWatchedFiles::METHOD => {
-                self.notify::<notif::DidChangeWatchedFiles>(n, Self::did_change_watched_files)
+                self.notify_isolated::<notif::DidChangeWatchedFiles>(
+                    n,
+                    Self::did_change_watched_files,
+                );
+                Ok(())
             }
             _ => Ok(()),
         };
@@ -415,6 +424,27 @@ impl Server {
         let params = serde_json::from_value(n.params)?;
         f(self, params);
         Ok(())
+    }
+
+    /// For notifications that only touch derived state (index, settings, published
+    /// diagnostics): a panic is logged and the server keeps running. `didOpen` and
+    /// `didChange` stay on the unwrapped `notify` path, where a panic mid-edit would
+    /// leave the document silently wrong.
+    fn notify_isolated<N>(&mut self, n: Notification, f: impl FnOnce(&mut Self, N::Params))
+    where
+        N: notif::Notification,
+        N::Params: DeserializeOwned,
+    {
+        let Ok(params) = serde_json::from_value::<N::Params>(n.params) else {
+            log::warn!("{}: cannot decode params", N::METHOD);
+            return;
+        };
+        match catch_unwind(AssertUnwindSafe(|| f(self, params))) {
+            Ok(()) => {}
+            Err(panic) => {
+                log::error!("{} panicked: {}", N::METHOD, panic_message(&*panic));
+            }
+        }
     }
 
     fn send(&self, msg: Message) {

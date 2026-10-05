@@ -388,6 +388,12 @@ pub struct Dialects {
     list: Vec<Arc<Dialect>>,
 }
 
+/// A checked-out repository may declare dialects in `.llsp.toml`, so loading is
+/// bounded: at most `MAX_DIALECTS` definitions, each with an `extends` chain at
+/// most `MAX_EXTENDS_DEPTH` levels long.
+const MAX_DIALECTS: usize = 1024;
+const MAX_EXTENDS_DEPTH: usize = 32;
+
 impl Dialects {
     pub fn builtin() -> Self {
         Self::load(&toml::Table::new()).expect("built-in dialects are valid")
@@ -411,12 +417,20 @@ impl Dialects {
                 }
             }
         }
+        if raw.len() > MAX_DIALECTS {
+            bail!(
+                "dialect count {} exceeds the maximum of {MAX_DIALECTS}",
+                raw.len()
+            );
+        }
+        extends_depths(&raw)?;
 
         let mut names: Vec<&String> = raw.keys().collect();
         names.sort();
         let mut list = Vec::with_capacity(names.len());
+        let mut memo: FxHashMap<String, toml::Table> = FxHashMap::default();
         for name in names {
-            let table = resolve(&raw, name, &mut Vec::new())?;
+            let table = resolve(&raw, name, &mut memo)?;
             let mut d: Dialect = table
                 .try_into()
                 .with_context(|| format!("dialect {name}"))?;
@@ -456,35 +470,79 @@ impl Dialects {
     }
 }
 
+/// Chain length of every dialect's `extends` ancestry, rejecting cycles and
+/// chains deeper than `MAX_EXTENDS_DEPTH` before any table is merged. Depths are
+/// memoized, so the check is order-independent and every walk is bounded.
+fn extends_depths(raw: &FxHashMap<String, toml::Table>) -> Result<()> {
+    fn depth(
+        raw: &FxHashMap<String, toml::Table>,
+        name: &str,
+        stack: &mut Vec<String>,
+        depths: &mut FxHashMap<String, usize>,
+    ) -> Result<usize> {
+        if let Some(&d) = depths.get(name) {
+            return Ok(d);
+        }
+        if stack.iter().any(|s| s == name) {
+            stack.push(name.to_owned());
+            bail!("dialect extends cycle: {}", stack.join(" -> "));
+        }
+        let Some(table) = raw.get(name) else {
+            bail!("unknown dialect {name}");
+        };
+        let d = match table.get("extends").and_then(toml::Value::as_str) {
+            Some(parent) => {
+                stack.push(name.to_owned());
+                let d = 1 + depth(raw, parent, stack, depths)?;
+                stack.pop();
+                d
+            }
+            None => 0,
+        };
+        depths.insert(name.to_owned(), d);
+        if d > MAX_EXTENDS_DEPTH {
+            bail!("dialect {name}: extends chain exceeds {MAX_EXTENDS_DEPTH} levels");
+        }
+        Ok(d)
+    }
+
+    let mut depths = FxHashMap::default();
+    for name in raw.keys() {
+        depth(raw, name, &mut Vec::new(), &mut depths)?;
+    }
+    Ok(())
+}
+
 fn resolve(
     raw: &FxHashMap<String, toml::Table>,
     name: &str,
-    stack: &mut Vec<String>,
+    memo: &mut FxHashMap<String, toml::Table>,
 ) -> Result<toml::Table> {
-    if stack.iter().any(|s| s == name) {
-        stack.push(name.to_owned());
-        bail!("dialect extends cycle: {}", stack.join(" -> "));
+    if let Some(table) = memo.get(name) {
+        return Ok(table.clone());
     }
-    let Some(table) = raw.get(name) else {
+    let Some(src) = raw.get(name) else {
         bail!("unknown dialect {name}");
     };
-    let mut table = table.clone();
-    let Some(parent) = table.remove("extends") else {
-        return Ok(table);
-    };
-    let Some(parent) = parent.as_str() else {
-        bail!("dialect {name}: extends must be a string");
-    };
-    stack.push(name.to_owned());
-    let mut base = resolve(raw, parent, stack)?;
-    stack.pop();
-    for key in ["extensions", "language_ids", "modeline_names"] {
-        if !table.contains_key(key) {
-            base.remove(key);
+    let mut table = src.clone();
+    let merged = match table.remove("extends") {
+        None => table,
+        Some(parent) => {
+            let Some(parent) = parent.as_str() else {
+                bail!("dialect {name}: extends must be a string");
+            };
+            let mut base = resolve(raw, parent, memo)?;
+            for key in ["extensions", "language_ids", "modeline_names"] {
+                if !table.contains_key(key) {
+                    base.remove(key);
+                }
+            }
+            merge_tables(&mut base, table);
+            base
         }
-    }
-    merge_tables(&mut base, table);
-    Ok(base)
+    };
+    memo.insert(name.to_owned(), merged.clone());
+    Ok(merged)
 }
 
 #[cfg(test)]
@@ -550,6 +608,42 @@ case_sensitive = true"#,
         ))
         .unwrap_err();
         assert!(err.to_string().contains("cycle"), "{err}");
+    }
+
+    #[test]
+    fn deep_extends_chain_is_error() {
+        let mut src = String::new();
+        for i in 1..=40 {
+            src.push_str(&format!("[c{i}]\nextends = \"c{}\"\n", i + 1));
+        }
+        src.push_str("[c41]\n");
+        let err = Dialects::load(&table(&src)).unwrap_err();
+        assert!(err.to_string().contains("extends chain exceeds"), "{err}");
+    }
+
+    #[test]
+    fn moderate_extends_chain_loads() {
+        let mut src = String::from("[base]\nextends = \"common-lisp\"\n");
+        for i in 1..=10 {
+            let parent = if i == 1 {
+                "base".to_owned()
+            } else {
+                format!("m{}", i - 1)
+            };
+            src.push_str(&format!("[m{i}]\nextends = \"{parent}\"\n"));
+        }
+        let d = Dialects::load(&table(&src)).unwrap();
+        assert!(d.get("m10").unwrap().def_spec("defun").is_some());
+    }
+
+    #[test]
+    fn dialect_count_is_bounded() {
+        let mut src = String::new();
+        for i in 0..1100 {
+            src.push_str(&format!("[x{i}]\n"));
+        }
+        let err = Dialects::load(&table(&src)).unwrap_err();
+        assert!(err.to_string().contains("dialect count"), "{err}");
     }
 
     #[test]

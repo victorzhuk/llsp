@@ -766,11 +766,16 @@ fn looks_numeric(text: &str) -> bool {
     body.starts_with(|c: char| c.is_ascii_digit()) && !text.ends_with(['+', '-'])
 }
 
+/// Parameters per signature are capped: signature labels and hover are computed
+/// per request on the main loop, and pathological parameter lists would dominate.
+const MAX_SIGNATURE_PARAMS: usize = 1024;
+
 fn signature(t: &Tree, params: NodeId, skip: usize) -> Signature {
     let names: Vec<String> = t
         .children(params)
         .iter()
         .skip(skip)
+        .take(MAX_SIGNATURE_PARAMS)
         .map(|&c| collapse(t.node_text(c)))
         .collect();
     let label = if skip == 0 {
