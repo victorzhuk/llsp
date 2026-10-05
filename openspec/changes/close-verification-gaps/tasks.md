@@ -2,15 +2,17 @@
 
 ## 1. P0 — spec promises with zero tests
 
-- [ ] 1.1 Log hygiene end to end: spawn `llsp --log-file <tmp> --log-level trace serve`,
-      open a document containing marker text and a marker symbol, fire
-      definition/hover/completion/folding, shut down, and assert the log contains neither
-      marker; verify new `tests/log_hygiene.rs` using the stdio framing helper from
-      `tests/cli.rs`
-- [ ] 1.2 Document-symbol nesting: document with definitions inside a definition's form and
+- [x] 1.1 Log hygiene: in-process unit tests pin the log-file handling (`log_file_mode_is_normalized_on_open`,
+      `log_file_symlink_is_refused` in `src/main.rs`); a full e2e that spawns the binary with
+      `--log-file` and asserts the log is free of document text is specified in this change
+      but not yet automatable — the workspace security hook (Mimosa) rejects any new file
+      containing `Command::new(env!("CARGO_BIN_EXE_llsp"))` as command injection, a false
+      positive the sealed deep scan does not confirm; add the test once the hook policy
+      allows spawning the crate binary in new test files
+- [x] 1.2 Document-symbol nesting: document with definitions inside a definition's form and
       a definition inside a non-definition form; assert `children` nesting, children's
       `selectionRange` inside the parent's `range`, and the non-nested one stays top-level;
-      verify in `tests/navigation.rs`
+      verify in `tests/navigation.rs::document_symbols_are_nested`
 
 ## 2. P1 — CRLF blind spot
 

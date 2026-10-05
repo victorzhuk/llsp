@@ -394,3 +394,34 @@ fn read_limited(path: &Path, max: u64) -> Result<String> {
     }
     Ok(std::fs::read_to_string(path)?)
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn settings() -> Settings {
+        llsp::config::Layers::default().resolve().unwrap()
+    }
+
+    #[test]
+    fn log_file_mode_is_normalized_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("llsp.log");
+        std::fs::write(&log, "pre-existing\n").unwrap();
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+        init_logging(&settings(), None, Some(&log)).unwrap();
+        let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "pre-existing log file mode is {mode:o}");
+    }
+
+    #[test]
+    fn log_file_symlink_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.log");
+        std::fs::write(&target, "").unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("llsp.log")).unwrap();
+        let err = init_logging(&settings(), None, Some(&dir.path().join("llsp.log"))).unwrap_err();
+        assert!(err.to_string().contains("symbolic link"), "{err}");
+    }
+}

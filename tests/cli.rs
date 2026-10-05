@@ -289,6 +289,56 @@ fn log_file_is_private() {
     assert_eq!(mode, 0o600);
 }
 
+#[cfg(unix)]
+#[test]
+fn log_file_mode_is_normalized() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("llsp.log");
+    std::fs::write(&log, "pre-existing\n").unwrap();
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let out = llsp(
+        dir.path(),
+        &["--log-file", log.to_str().unwrap(), "dialects"],
+    );
+    assert!(out.status.success());
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "pre-existing log file mode is {mode:o}");
+}
+
+#[cfg(unix)]
+#[test]
+fn log_file_rejects_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("target.log"), "").unwrap();
+    std::os::unix::fs::symlink(dir.path().join("target.log"), dir.path().join("llsp.log")).unwrap();
+    let out = llsp(dir.path(), &["--log-file", "llsp.log", "dialects"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("symbolic link"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn deep_dialect_chain_in_project_file_is_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut src = String::new();
+    for i in 1..=40 {
+        src.push_str(&format!("[dialects.c{i}]\nextends = \"c{}\"\n", i + 1));
+    }
+    src.push_str("[dialects.c41]\n");
+    std::fs::write(dir.path().join(".llsp.toml"), src).unwrap();
+    let out = llsp(dir.path(), &["config"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("extends chain"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn check_directory_follows_workspace_rules() {
     let dir = tempfile::tempdir().unwrap();

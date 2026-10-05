@@ -207,6 +207,26 @@ fn hover_kinds() {
 }
 
 #[test]
+fn hover_on_huge_parameter_list_answers() {
+    // Well past MAX_SIGNATURE_PARAMS (1024), but under the binder-resolution
+    // scale where analysis cost itself dominates.
+    let params: Vec<String> = (0..5_000).map(|i| format!("p{i}")).collect();
+    let source = format!("(defun f ({}) 1)\n(f 1)", params.join(" "));
+    let ws = Workspace::new(&[("a.lisp", &source)]);
+    let mut c = ws.client(1);
+    ws.open(&mut c, "a.lisp");
+    // Position on the call head `f`, one past the opening paren.
+    let mut p = ws.pos("a.lisp", "(f 1", 0);
+    let ch = p["position"]["character"].as_u64().unwrap() + 1;
+    p["position"]["character"] = json!(ch);
+    let h = c.request_raw("textDocument/hover", p).unwrap();
+    let value = h["contents"]["value"].as_str().unwrap();
+    assert!(value.contains("(f p0 p1"), "{value}");
+    assert!(!value.contains("p4999"), "label must be capped: {value}");
+    c.shutdown();
+}
+
+#[test]
 fn lispico_assist_respects_cells() {
     let ws = Workspace::new(&[
         ("a.lisp", "(defun n () 2)"),

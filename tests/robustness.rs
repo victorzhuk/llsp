@@ -137,6 +137,32 @@ proptest! {
 }
 
 #[test]
+fn state_transition_notifications_keep_server_running() {
+    let mut c = Client::start();
+    c.open("file:///w/a.lisp", "lisp", "(defun f () 1)");
+    c.notify_raw(
+        "textDocument/didClose",
+        json!({"textDocument": {"uri": "file:///w/a.lisp"}}),
+    );
+    c.notify_raw(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [
+            {"uri": "file:///w/a.lisp", "type": 2},
+            {"uri": "file:///outside/x.lisp", "type": 1},
+        ]}),
+    );
+    c.notify_raw(
+        "workspace/didChangeConfiguration",
+        json!({"settings": {"format": {"body_indent": 3}}}),
+    );
+    // Requests still answer and shutdown stays clean after the transitions.
+    let _ = c
+        .request_raw("workspace/symbol", json!({"query": "f"}))
+        .unwrap();
+    assert!(c.shutdown());
+}
+
+#[test]
 fn read_eval_document_is_only_syntax() {
     let mut c = Client::start();
     let text = "#.(run-program \"rm\")\n(defun f () #.(error \"boom\"))";

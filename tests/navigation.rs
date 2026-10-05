@@ -29,9 +29,9 @@ fn ranges(v: &Value) -> Vec<(String, u64, u64, u64)> {
 fn document_symbols_are_nested() {
     let ws = Workspace::new(&[(
         "a.lisp",
-        "(defun a () (flet ((x ())) x))\n(defclass b () ())\n(progn (defvar *c* 1))",
+        "(defun a () (flet ((x ())) x) (defun inner () 1))\n(defclass b () ())\n(progn (defvar *c* 1))",
     )]);
-    let mut c = ws.client(3);
+    let mut c = ws.client(4);
     ws.open(&mut c, "a.lisp");
     let v = c
         .request_raw(
@@ -55,6 +55,19 @@ fn document_symbols_are_nested() {
     );
     assert_eq!(v[0]["detail"], "()");
     assert_eq!(v[0]["selectionRange"]["start"]["character"], 7);
+    // A definition inside another definition's form is its child; the defvar
+    // inside the non-definition `progn` stays top-level.
+    let children = v[0]["children"].as_array().unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0]["name"], "inner");
+    assert_eq!(children[0]["kind"], 12);
+    let child_sel = &children[0]["selectionRange"]["start"];
+    let parent_range = &v[0]["range"];
+    assert!(
+        child_sel["line"].as_u64().unwrap() >= parent_range["start"]["line"].as_u64().unwrap()
+            && child_sel["line"].as_u64().unwrap() <= parent_range["end"]["line"].as_u64().unwrap(),
+        "child selection {child_sel} must sit inside parent range {parent_range}"
+    );
     c.shutdown();
 }
 
