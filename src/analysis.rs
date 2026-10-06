@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::dialect::{BindingShape, Cell, DefSpec, Dialect, ParamSearch, Params, SymbolKind};
 use crate::syntax::{Delim, NodeId, NodeKind, Tree};
@@ -66,7 +66,9 @@ pub struct Analysis {
     pub aliases: FxHashMap<String, String>,
     /// Names imported with `:refer`, by normalized name, to their namespace.
     pub refers: FxHashMap<String, String>,
-    scopes: FxHashMap<NodeId, Vec<u32>>,
+    /// Binder indices per scope, grouped by normalized name so `resolve` is a
+    /// hash lookup per ancestor instead of a scan of every binder in scope.
+    scopes: FxHashMap<NodeId, FxHashMap<String, Vec<u32>>>,
     binder_nodes: FxHashMap<NodeId, u32>,
 }
 
@@ -531,7 +533,7 @@ impl Walker<'_> {
                 if let Some(&spec) = kids.get(1)
                     && let [patterns @ .., _] = t.children(spec)
                 {
-                    let mut seen = Vec::new();
+                    let mut seen = FxHashSet::default();
                     for &p in patterns {
                         self.collect_pattern(p, id, end(spec), &mut seen);
                     }
@@ -577,7 +579,7 @@ impl Walker<'_> {
             return;
         }
         let mut after_marker = false;
-        let mut seen = Vec::new();
+        let mut seen = FxHashSet::default();
         for &p in t.children(params).iter().skip(skip) {
             if let Some(a) = t.atom(p)
                 && (a.starts_with('&') || self.d.is_pattern_ignored(&self.key(a)))
@@ -599,11 +601,17 @@ impl Walker<'_> {
     }
 
     fn bind_pattern(&mut self, pat: NodeId, scope: NodeId, from: u32) {
-        let mut seen = Vec::new();
+        let mut seen = FxHashSet::default();
         self.collect_pattern(pat, scope, from, &mut seen);
     }
 
-    fn collect_pattern(&mut self, pat: NodeId, scope: NodeId, from: u32, seen: &mut Vec<String>) {
+    fn collect_pattern(
+        &mut self,
+        pat: NodeId,
+        scope: NodeId,
+        from: u32,
+        seen: &mut FxHashSet<String>,
+    ) {
         let t = self.tree;
         let mut stack = vec![pat];
         while let Some(n) = stack.pop() {
@@ -617,7 +625,7 @@ impl Walker<'_> {
         }
     }
 
-    fn bind_one(&mut self, n: NodeId, scope: NodeId, from: u32, seen: &mut Vec<String>) {
+    fn bind_one(&mut self, n: NodeId, scope: NodeId, from: u32, seen: &mut FxHashSet<String>) {
         let Some(text) = self.tree.atom(n) else {
             return;
         };
@@ -628,7 +636,7 @@ impl Walker<'_> {
         if self.d.is_pattern_ignored(&key) || seen.contains(&key) {
             return;
         }
-        seen.push(key);
+        seen.insert(key);
         self.binder(n, scope, from);
     }
 
@@ -637,10 +645,11 @@ impl Walker<'_> {
         let text = t.node_text(n);
         let node = t.node(n);
         let s = t.node(scope);
+        let key = self.key(text);
         let idx = self.a.binders.len() as u32;
         self.a.binders.push(Binder {
             name: text.to_owned(),
-            key: self.key(text),
+            key: key.clone(),
             start: node.start,
             end: node.end,
             visible_from,
@@ -648,7 +657,13 @@ impl Walker<'_> {
             scope_end: s.end,
             cell: Cell::Value,
         });
-        self.a.scopes.entry(scope).or_default().push(idx);
+        self.a
+            .scopes
+            .entry(scope)
+            .or_default()
+            .entry(key)
+            .or_default()
+            .push(idx);
         self.a.binder_nodes.insert(n, idx);
     }
 
@@ -731,14 +746,14 @@ impl Walker<'_> {
 
     fn resolve(&self, id: NodeId, key: &str, offset: u32, cell: Cell) -> Target {
         for anc in self.tree.ancestors(id).skip(1) {
-            let Some(ids) = self.a.scopes.get(&anc) else {
+            let Some(ids) = self.a.scopes.get(&anc).and_then(|m| m.get(key)) else {
                 continue;
             };
             let best = ids
                 .iter()
                 .filter(|&&b| {
                     let b = &self.a.binders[b as usize];
-                    b.key == key && b.visible_from <= offset && self.d.cells_match(b.cell, cell)
+                    b.visible_from <= offset && self.d.cells_match(b.cell, cell)
                 })
                 .max_by_key(|&&b| self.a.binders[b as usize].visible_from);
             if let Some(&b) = best {

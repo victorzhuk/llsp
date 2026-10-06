@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Watched-file event bursts and document close no longer block request handling: index
+  updates are summarized off the main loop and applied in order.
+- Completion no longer clones every workspace match before ranking: candidate data is
+  materialized only for the returned items.
+- Analyzing definitions with very large parameter lists no longer stalls (quadratic
+  pattern dedup and per-scope binder lookup are now hash-based).
 - `llsp format` now resolves `(declare (indent N))` hints across all files it processes,
   matching what the editor's formatting produces for the same workspace, instead of
   seeing only the file being formatted.

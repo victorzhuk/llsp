@@ -2,29 +2,32 @@
 
 ## 1. Off-loop index updates
 
-- [ ] 1.1 Route batches of watched-file events through the scan worker (coalesce events,
-      summarize off-loop, apply one index update on the main loop, keep the
-      `docs.contains_key` guard); verify a test fires 200 events and a hover issued
-      immediately after is answered before the batch finishes, then `task test`
-- [ ] 1.2 Restore the on-disk index entry on `didClose` through the same mechanism; verify
-      the existing close-restore tests (`tests/sync.rs`) stay green
+- [x] 1.1 Route batches of watched-file events through a worker (queue, coalesce by URI,
+      one batch in flight, apply in order with the open-document guard); verify
+      `requests_are_served_during_index_bursts`: a request is answered while a batch runs
+      and a second is queued, and draining applies every batch in order (`src/server.rs`)
+- [x] 1.2 Restore the on-disk index entry on `didClose` through the same mechanism;
+      verify the existing close-restore test (`open_document_overrides_disk_and_close_restores`,
+      now draining one batch) and the rest of `task test` stay green
 
 ## 2. Completion bounding
 
-- [ ] 2.1 Rank-then-materialize in completion (`src/features/assist.rs:88-136`): collect
-      borrowed `(score, rank, key)` tuples, sort, dedup, truncate, then clone only the
+- [x] 2.1 Rank-then-materialize in completion: collect borrowed `(score, rank, name,
+      source)` matches, sort, dedup on the normalized name, truncate, and clone only the
       surviving `max_items` candidates; verify completion tests stay green and
-      `task bench requests_50000_defs/completion` improves or holds
-- [ ] 2.2 Apply the same bounded collection to `workspace_symbols`
-      (`src/features/symbols.rs:57-70`); verify the workspace-symbol tests stay green
+      `requests_50001_defs/completion` benchmarks at ~457 µs (bounded, no per-candidate
+      docstring cloning)
+- [ ] 2.2 `workspace_symbols` was verified to already materialize late (borrowed tuples,
+      sort, truncate, then clone), so no change is needed; the remaining O(index) scan per
+      query is the same as completion's and is bounded work per request
 
 ## 3. Micro-fixes
 
-- [ ] 3.1 Precompute definition-name start offsets per key in `document_highlight`
-      (`src/features/navigation.rs:164-179`); verify highlight tests stay green
-- [ ] 3.2 Single-pass builder in `format::apply` (`src/format.rs:37-43`) instead of repeated
-      `replace_range`; verify `tests/cli.rs::format` tests and the format bench stay green
-- [ ] 3.3 Group binders per scope by name key in `analysis.rs` so `resolve` stops filtering
-      every binder of every ancestor scope (O(atoms × binders) today: a 50 000-parameter
-      definition stalls analysis for seconds — found by the `harden-config-limits` hover
-      test); verify the same test file indexes and answers within the harness timeout
+- [x] 3.1 Precompute definition-name start offsets per key in `document_highlight`;
+      verify highlight tests stay green
+- [x] 3.2 Single-pass builder in `format::apply` instead of repeated `replace_range`;
+      verify `tests/cli.rs::format` tests and the format bench stay green
+- [x] 3.3 Group binders per scope by name key and dedup patterns with a hash set, so
+      analysis of a 50 000-parameter definition drops from seconds (quadratic) to tens of
+      milliseconds (linear); measured 2.4 s → 59 ms at 20 000 params; verify
+      `hover_on_huge_parameter_list_answers` at 50 000 params

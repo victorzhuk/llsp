@@ -35,10 +35,18 @@ pub fn format(
 }
 
 pub fn apply(text: &str, edits: &[Edit]) -> String {
-    let mut out = text.to_owned();
-    for e in edits.iter().rev() {
-        out.replace_range(e.start as usize..e.end as usize, &e.text);
+    // Single pass in document order: edits are sorted and non-overlapping, so
+    // appending slices avoids re-mmoving the tail per edit.
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0usize;
+    for e in edits {
+        let s = (e.start as usize).max(pos);
+        let en = (e.end as usize).max(pos);
+        out.push_str(&text[pos..s]);
+        out.push_str(&e.text);
+        pos = en;
     }
+    out.push_str(&text[pos..]);
     out
 }
 

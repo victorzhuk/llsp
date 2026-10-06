@@ -237,7 +237,13 @@ pub fn discover(settings: &Settings, roots: &[PathBuf], max_files: usize) -> (Ve
     (out, truncated)
 }
 
-pub fn summarize(settings: &Settings, path: &Path) -> Option<FileSummary> {
+/// Summarizes one on-disk file. Confinement is enforced at read time: the
+/// canonicalized path is re-checked against the roots immediately before reading,
+/// so a directory swapped for a symlink during a scan cannot escape the roots.
+pub fn summarize(settings: &Settings, roots: &[PathBuf], path: &Path) -> Option<FileSummary> {
+    if !is_inside(roots, path) {
+        return None;
+    }
     let meta = std::fs::symlink_metadata(path).ok()?;
     if !meta.is_file() || meta.len() > settings.config.files.max_file_size {
         return None;
@@ -259,7 +265,7 @@ pub fn scan(settings: &Settings, roots: &[PathBuf]) -> Vec<FileSummary> {
     }
     files
         .par_iter()
-        .filter_map(|p| summarize(settings, p))
+        .filter_map(|p| summarize(settings, roots, p))
         .collect()
 }
 
@@ -366,7 +372,10 @@ mod tests {
         .unwrap();
         let s = settings("");
         let (files, _) = discover(&s, &[dir.path().to_path_buf()], usize::MAX);
-        let summaries: Vec<_> = files.iter().filter_map(|p| summarize(&s, p)).collect();
+        let summaries: Vec<_> = files
+            .iter()
+            .filter_map(|p| summarize(&s, &[dir.path().to_path_buf()], p))
+            .collect();
         assert_eq!(summaries.len(), 1, "{files:?}");
         let root = dir.path().canonicalize().unwrap();
         assert!(!is_inside(

@@ -15,13 +15,19 @@ use crate::session::{Session, Sym, same_dialect};
 use crate::syntax::{Delim, NodeId, NodeKind, Tree};
 use crate::workspace::FileSummary;
 
-struct Candidate {
-    label: String,
-    kind: CompletionItemKind,
-    detail: Option<String>,
-    doc: Option<String>,
+/// Where a completion match came from; everything stays borrowed until the
+/// final `max_items` survivors are materialized.
+enum Source<'a> {
+    Local,
+    Def(&'a Def),
+    Builtin(CompletionItemKind, &'static str),
+}
+
+struct Match<'a> {
+    name: &'a str,
     score: u8,
     rank: u8,
+    source: Source<'a>,
 }
 
 pub(crate) fn completion(
@@ -52,8 +58,7 @@ pub(crate) fn completion(
     let want_cell = completion_cell(tree, &doc.dialect, a, offset);
     let cfg = &s.settings.config.completion;
 
-    let mut out: Vec<Candidate> = Vec::new();
-    let mut push = |c: Candidate| out.push(c);
+    let mut matches: Vec<Match<'_>> = Vec::new();
     match qualifier {
         Some(q) => {
             let ns = doc.dialect.normalize(a.resolve_qualifier(q)).into_owned();
@@ -63,7 +68,12 @@ pub(crate) fn completion(
                         && doc.dialect.cells_match(d.cell, want_cell)
                 }) {
                     if let Some(score) = fuzzy_score(&query, &d.name) {
-                        push(def_candidate(d, score));
+                        matches.push(Match {
+                            name: &d.name,
+                            score,
+                            rank: 1,
+                            source: Source::Def(d),
+                        });
                     }
                 }
             }
@@ -74,13 +84,11 @@ pub(crate) fn completion(
                     if let Some(score) = fuzzy_score(&query, &b.name)
                         && !(b.start <= offset && offset <= b.end)
                     {
-                        push(Candidate {
-                            label: b.name.clone(),
-                            kind: CompletionItemKind::VARIABLE,
-                            detail: Some("local".into()),
-                            doc: None,
+                        matches.push(Match {
+                            name: &b.name,
                             score,
                             rank: 0,
+                            source: Source::Local,
                         });
                     }
                 }
@@ -90,7 +98,12 @@ pub(crate) fn completion(
                     .search(&query)
                     .filter(|(_, d)| doc.dialect.cells_match(d.cell, want_cell))
                 {
-                    push(def_candidate(d, score));
+                    matches.push(Match {
+                        name: &d.name,
+                        score,
+                        rank: 1,
+                        source: Source::Def(d),
+                    });
                 }
             }
             if cfg.builtins {
@@ -107,13 +120,11 @@ pub(crate) fn completion(
                 for (names, kind, detail) in lists {
                     for n in names {
                         if let Some(score) = fuzzy_score(&query, n) {
-                            push(Candidate {
-                                label: n.clone(),
-                                kind,
-                                detail: Some(detail.into()),
-                                doc: None,
+                            matches.push(Match {
+                                name: n,
                                 score,
                                 rank: 2,
+                                source: Source::Builtin(kind, detail),
                             });
                         }
                     }
@@ -122,32 +133,49 @@ pub(crate) fn completion(
         }
     }
 
-    out.sort_by(|a, b| {
-        (a.score, a.rank, a.label.len(), &a.label).cmp(&(b.score, b.rank, b.label.len(), &b.label))
+    matches.sort_by(|a, b| {
+        (a.score, a.rank, a.name.len(), a.name).cmp(&(b.score, b.rank, b.name.len(), b.name))
     });
     let mut seen = FxHashSet::default();
-    out.retain(|c| seen.insert(doc.dialect.normalize(&c.label).into_owned()));
-    let incomplete = out.len() > cfg.max_items;
-    out.truncate(cfg.max_items);
+    matches.retain(|m| seen.insert(doc.dialect.normalize(m.name).into_owned()));
+    let incomplete = matches.len() > cfg.max_items;
+    matches.truncate(cfg.max_items);
 
     let range = doc.range(base_start, offset, s.enc);
-    let items = out
+    let items = matches
         .into_iter()
         .enumerate()
-        .map(|(i, c)| CompletionItem {
-            label: c.label.clone(),
-            kind: Some(c.kind),
-            detail: c.detail,
-            documentation: c.doc.map(|d| {
-                Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: d,
-                })
-            }),
-            sort_text: Some(format!("{i:05}")),
-            filter_text: Some(c.label.clone()),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(range, c.label))),
-            ..Default::default()
+        .map(|(i, m)| {
+            let (label, kind, detail, doc_string) = match m.source {
+                Source::Local => (m.name.to_owned(), CompletionItemKind::VARIABLE, None, None),
+                Source::Def(d) => (
+                    d.name.clone(),
+                    def_kind(d.kind),
+                    d.signatures.first().map(|sig| sig.label.clone()),
+                    d.doc.clone(),
+                ),
+                Source::Builtin(kind, detail) => {
+                    (m.name.to_owned(), kind, Some(detail.into()), None)
+                }
+            };
+            CompletionItem {
+                label: label.clone(),
+                kind: Some(kind),
+                detail,
+                documentation: doc_string.map(|d| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: d,
+                    })
+                }),
+                sort_text: Some(format!("{i:05}")),
+                filter_text: Some(label),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(
+                    range,
+                    m.name.to_owned(),
+                ))),
+                ..Default::default()
+            }
         })
         .collect();
     Ok(Some(CompletionResponse::List(CompletionList {
@@ -373,24 +401,17 @@ fn gap_value_cell(tree: &Tree, d: &Dialect, id: NodeId) -> bool {
     }
 }
 
-fn def_candidate(d: &Def, score: u8) -> Candidate {
-    Candidate {
-        label: d.name.clone(),
-        kind: match d.kind {
-            SymbolKind::Function | SymbolKind::Test => CompletionItemKind::FUNCTION,
-            SymbolKind::Macro => CompletionItemKind::KEYWORD,
-            SymbolKind::Variable => CompletionItemKind::VARIABLE,
-            SymbolKind::Constant => CompletionItemKind::CONSTANT,
-            SymbolKind::Class | SymbolKind::Type => CompletionItemKind::CLASS,
-            SymbolKind::Struct => CompletionItemKind::STRUCT,
-            SymbolKind::Interface => CompletionItemKind::INTERFACE,
-            SymbolKind::Method => CompletionItemKind::METHOD,
-            SymbolKind::Module => CompletionItemKind::MODULE,
-        },
-        detail: d.signatures.first().map(|s| s.label.clone()),
-        doc: d.doc.clone(),
-        score,
-        rank: 1,
+fn def_kind(kind: SymbolKind) -> CompletionItemKind {
+    match kind {
+        SymbolKind::Function | SymbolKind::Test => CompletionItemKind::FUNCTION,
+        SymbolKind::Macro => CompletionItemKind::KEYWORD,
+        SymbolKind::Variable => CompletionItemKind::VARIABLE,
+        SymbolKind::Constant => CompletionItemKind::CONSTANT,
+        SymbolKind::Class | SymbolKind::Type => CompletionItemKind::CLASS,
+        SymbolKind::Struct => CompletionItemKind::STRUCT,
+        SymbolKind::Interface => CompletionItemKind::INTERFACE,
+        SymbolKind::Method => CompletionItemKind::METHOD,
+        SymbolKind::Module => CompletionItemKind::MODULE,
     }
 }
 

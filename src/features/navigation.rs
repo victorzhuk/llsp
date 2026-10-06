@@ -150,20 +150,25 @@ pub(crate) fn document_highlight(
                 .map(|(st, e)| highlight(st, e, st == start))
                 .collect()
         }
-        Sym::Global { key, cell, .. } => a
-            .occurrences
-            .iter()
-            .filter(|o| {
-                o.target == Target::Global && o.key == key && doc.dialect.cells_match(o.cell, cell)
-            })
-            .map(|o| {
-                let is_def = a
-                    .defs
-                    .iter()
-                    .any(|d| d.key == key && d.name_start <= o.start && o.start < d.name_end);
-                highlight(o.start, o.end, is_def)
-            })
-            .collect(),
+        Sym::Global { key, cell, .. } => {
+            // Definition-name starts of this key, so each occurrence is a hash
+            // lookup instead of a scan over every definition.
+            let def_starts: rustc_hash::FxHashSet<u32> = a
+                .defs
+                .iter()
+                .filter(|d| d.key == key)
+                .map(|d| d.name_start)
+                .collect();
+            a.occurrences
+                .iter()
+                .filter(|o| {
+                    o.target == Target::Global
+                        && o.key == key
+                        && doc.dialect.cells_match(o.cell, cell)
+                })
+                .map(|o| highlight(o.start, o.end, def_starts.contains(&o.start)))
+                .collect()
+        }
     };
     Ok(Some(out))
 }

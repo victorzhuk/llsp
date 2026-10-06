@@ -40,10 +40,17 @@ pub struct Server {
     watch_files: bool,
     next_request: i32,
     pending: FxHashMap<Uri, Instant>,
+    /// Watched-file updates and close-restore jobs waiting for the worker.
+    queued_updates: Vec<(Uri, PathBuf)>,
+    /// Whether a worker thread is summarizing a dispatched batch.
+    updates_in_flight: bool,
 }
 
 enum Event {
     Indexed(u64, Vec<FileSummary>),
+    /// Watched-file/close-restore results produced off-loop; applied one batch
+    /// at a time, in order. `None` means the file is gone or unreadable.
+    Updated(Vec<(Uri, Option<FileSummary>)>),
 }
 
 /// Runs the protocol until `exit`. Returns whether `shutdown` was received first.
@@ -103,6 +110,8 @@ pub fn run(conn: Connection, mut layers: Layers) -> Result<bool> {
         watch_files,
         next_request: 0,
         pending: FxHashMap::default(),
+        queued_updates: Vec::new(),
+        updates_in_flight: false,
     };
     server.register_watchers();
     server.start_scan();
@@ -239,7 +248,50 @@ impl Server {
                 self.reindex_open_documents();
                 self.publish_open_documents();
             }
+            Event::Updated(results) => {
+                for (uri, summary) in results {
+                    // The file may have been opened while the worker read it;
+                    // the open version in the index wins.
+                    if self.session.docs.contains_key(&uri) {
+                        continue;
+                    }
+                    match summary {
+                        Some(s) => self.session.index.insert(s),
+                        None => self.session.index.remove(&uri),
+                    }
+                }
+                self.updates_in_flight = false;
+                self.dispatch_updates();
+            }
         }
+    }
+
+    /// Hands the queued watched-file and close-restore jobs to a worker thread.
+    /// One batch in flight at a time keeps index updates applied in order.
+    fn dispatch_updates(&mut self) {
+        if self.updates_in_flight || self.queued_updates.is_empty() {
+            return;
+        }
+        let batch: Vec<_> = self.queued_updates.drain(..).collect();
+        self.updates_in_flight = true;
+        let settings = self.session.settings.clone();
+        let roots = self.session.roots.clone();
+        let sender = self.events.0.clone();
+        std::thread::spawn(move || {
+            let results = batch
+                .into_iter()
+                .map(|(uri, path)| {
+                    let summary = workspace::summarize(&settings, &roots, &path);
+                    (uri, summary)
+                })
+                .collect();
+            let _ = sender.send(Event::Updated(results));
+        });
+    }
+
+    fn queue_update(&mut self, uri: Uri, path: PathBuf) {
+        self.queued_updates.retain(|(u, _)| u != &uri);
+        self.queued_updates.push((uri, path));
     }
 
     fn start_scan(&mut self) {
@@ -516,11 +568,11 @@ impl Server {
         self.session.docs.remove(&uri);
         self.pending.remove(&uri);
         self.session.index.remove(&uri);
-        if let Some(path) = uri_to_path(&uri)
-            && workspace::is_inside(&self.session.roots, &path)
-            && let Some(summary) = workspace::summarize(&self.session.settings, &path)
-        {
-            self.session.index.insert(summary);
+        // Restore the on-disk version off the main loop; until the batch is
+        // applied the file simply stays out of the index.
+        if let Some(path) = uri_to_path(&uri) {
+            self.queue_update(uri, path);
+            self.dispatch_updates();
         }
         self.send_notification::<notif::PublishDiagnostics>(PublishDiagnosticsParams {
             uri: p.text_document.uri,
@@ -539,6 +591,7 @@ impl Server {
                 continue;
             };
             if change.typ == FileChangeType::DELETED {
+                // No I/O: removal stays on the loop.
                 self.session.index.remove(&uri);
                 continue;
             }
@@ -546,11 +599,9 @@ impl Server {
                 log::debug!("ignoring watched file outside roots: {}", path.display());
                 continue;
             }
-            match workspace::summarize(&self.session.settings, &path) {
-                Some(s) => self.session.index.insert(s),
-                None => self.session.index.remove(&uri),
-            }
+            self.queue_update(uri, path);
         }
+        self.dispatch_updates();
     }
 
     fn did_change_configuration(&mut self, p: lsp_types::DidChangeConfigurationParams) {
@@ -730,12 +781,20 @@ mod tests {
             watch_files: false,
             next_request: 0,
             pending: FxHashMap::default(),
+            queued_updates: Vec::new(),
+            updates_in_flight: false,
         };
         (s, client)
     }
 
     fn scan_now(s: &mut Server) {
         s.start_scan();
+        let ev = s.events.1.recv().unwrap();
+        s.on_event(ev);
+    }
+
+    /// Applies one off-loop update batch (watched-file events, close restore).
+    fn apply_updates(s: &mut Server) {
         let ev = s.events.1.recv().unwrap();
         s.on_event(ev);
     }
@@ -778,7 +837,52 @@ mod tests {
         s.did_close(lsp_types::DidCloseTextDocumentParams {
             text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
         });
+        apply_updates(&mut s);
         assert_eq!(def_names(&s, &uri), ["old"]);
+    }
+
+    #[test]
+    fn requests_are_served_during_index_bursts() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let (mut s, _client) = server(&root);
+        let event = |i: usize| {
+            let path = root.join(format!("f{i}.lisp"));
+            std::fs::write(&path, format!("(defun f{i} ())")).unwrap();
+            lsp_types::FileEvent {
+                uri: path_to_uri(&path).unwrap(),
+                typ: FileChangeType::CREATED,
+            }
+        };
+        // First notification dispatches a batch to the worker; a second one
+        // arriving while it runs stays queued.
+        s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {
+            changes: (0..300).map(event).collect(),
+        });
+        s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {
+            changes: vec![event(300)],
+        });
+        assert_eq!(s.queued_updates.len(), 1, "second batch must be queued");
+
+        // Requests are answered while the batch runs and one is queued.
+        let v = crate::features::symbols::workspace_symbols(
+            &s.session,
+            lsp_types::WorkspaceSymbolParams {
+                query: "f0".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(v.is_some(), "request must be answered during the burst");
+
+        // Draining the queue applies every batch in order.
+        while s.updates_in_flight || !s.queued_updates.is_empty() {
+            apply_updates(&mut s);
+        }
+        let path300 = root.join("f300.lisp");
+        let uri300 = path_to_uri(&path300).unwrap();
+        assert_eq!(def_names(&s, &uri300), ["f300"]);
+        assert_eq!(s.session.index.files().count(), 301);
     }
 
     #[test]
@@ -812,6 +916,7 @@ mod tests {
                 event(out_uri.clone(), FileChangeType::CREATED),
             ],
         });
+        apply_updates(&mut s);
         assert_eq!(def_names(&s, &uri), ["f"]);
         assert!(s.session.index.get(&out_uri).is_none());
         s.did_change_watched_files(lsp_types::DidChangeWatchedFilesParams {

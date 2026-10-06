@@ -208,9 +208,9 @@ fn hover_kinds() {
 
 #[test]
 fn hover_on_huge_parameter_list_answers() {
-    // Well past MAX_SIGNATURE_PARAMS (1024), but under the binder-resolution
-    // scale where analysis cost itself dominates.
-    let params: Vec<String> = (0..5_000).map(|i| format!("p{i}")).collect();
+    // Past MAX_SIGNATURE_PARAMS (1024) by orders of magnitude; this only
+    // completes quickly because pattern dedup and resolution are hash-based.
+    let params: Vec<String> = (0..50_000).map(|i| format!("p{i}")).collect();
     let source = format!("(defun f ({}) 1)\n(f 1)", params.join(" "));
     let ws = Workspace::new(&[("a.lisp", &source)]);
     let mut c = ws.client(1);
@@ -223,6 +223,7 @@ fn hover_on_huge_parameter_list_answers() {
     let value = h["contents"]["value"].as_str().unwrap();
     assert!(value.contains("(f p0 p1"), "{value}");
     assert!(!value.contains("p4999"), "label must be capped: {value}");
+    assert!(!value.contains("p49999"), "label must be capped: {value}");
     c.shutdown();
 }
 
