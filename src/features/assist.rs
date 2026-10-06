@@ -395,8 +395,8 @@ fn gap_value_cell(tree: &Tree, d: &Dialect, id: NodeId) -> bool {
         return false;
     };
     match tree.node(gp).kind {
-        NodeKind::Prefix => tree.prefix_text(gp) == "#",
-        NodeKind::List(Delim::Paren) => tree.head(gp).is_some_and(|h| d.normalize(h) == "cond"),
+        NodeKind::Prefix => crate::analysis::in_reader_vector(tree, id),
+        NodeKind::List(Delim::Paren) => crate::analysis::in_cond_clause(tree, d, id),
         _ => false,
     }
 }
@@ -472,15 +472,15 @@ fn param_slots(d: &Dialect, s: &Signature) -> (Vec<usize>, Option<usize>) {
     let mut keys = false;
     for (i, p) in s.params.iter().enumerate() {
         let key = d.normalize(p);
-        match key.as_ref() {
-            "&rest" | "&body" | "&" | "." | "&more" => in_rest = true,
-            "&key" => keys = true,
-            _ if key.starts_with('&') || d.is_pattern_ignored(&key) => {}
-            _ if in_rest => {
-                rest.get_or_insert(i);
-            }
-            _ if !keys => positional.push(i),
-            _ => {}
+        if d.is_rest_marker(&key) {
+            in_rest = true;
+        } else if d.is_key_marker(&key) {
+            keys = true;
+        } else if key.starts_with('&') || d.is_pattern_ignored(&key) {
+        } else if in_rest {
+            rest.get_or_insert(i);
+        } else if !keys {
+            positional.push(i);
         }
     }
     (positional, rest)
@@ -512,7 +512,7 @@ fn enclosing_call(doc: &Document, offset: u32) -> Option<(NodeId, NodeId)> {
 
 #[cfg(test)]
 mod tests {
-    use super::completion_cell;
+    use super::{completion_cell, param_slots};
     use crate::analysis::Analysis;
     use crate::dialect::Cell;
     use crate::dialect::Dialects;
@@ -524,6 +524,33 @@ mod tests {
         let t = Tree::parse(src.to_owned(), d);
         let a = Analysis::new(&t, d);
         completion_cell(&t, d, &a, offset)
+    }
+
+    fn loaded_dialect(toml: &str) -> std::sync::Arc<crate::dialect::Dialect> {
+        let overrides: toml::Table = toml::from_str(toml).unwrap();
+        Dialects::load(&overrides)
+            .unwrap()
+            .get("mine")
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn rest_markers_are_dialect_data() {
+        let mine =
+            loaded_dialect("[mine]\nextends = \"common-lisp\"\nrest_markers = [\"&others\"]");
+        let tree = Tree::parse("(defun f (a &others r) r)".to_owned(), &mine);
+        let a = Analysis::new(&tree, &mine);
+        let (positional, rest) = param_slots(&mine, &a.defs[0].signatures[0]);
+        assert_eq!(positional, [0]);
+        assert_eq!(rest, Some(2));
+        // The stock dialect keeps its own markers.
+        let cl = Dialects::builtin().get("common-lisp").unwrap().clone();
+        let tree = Tree::parse("(defun f (a &rest r) r)".to_owned(), &cl);
+        let a = Analysis::new(&tree, &cl);
+        let (positional, rest) = param_slots(&cl, &a.defs[0].signatures[0]);
+        assert_eq!(positional, [0]);
+        assert_eq!(rest, Some(2));
     }
 
     #[test]

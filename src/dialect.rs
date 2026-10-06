@@ -64,8 +64,64 @@ pub struct Dialect {
     pub constants: Vec<String>,
     #[serde(default)]
     pub function_cells: bool,
+    /// Lambda-list markers that open the rest parameter (compared normalized).
+    #[serde(default = "rest_markers")]
+    pub rest_markers: Vec<String>,
+    /// Lambda-list markers that switch to keyword arguments.
+    #[serde(default = "key_markers")]
+    pub key_markers: Vec<String>,
+    /// String prefixes whose string is a regexp literal (compared raw).
+    #[serde(default = "regexp_string_prefixes")]
+    pub regexp_string_prefixes: Vec<String>,
+    /// Forms that declare a definition's indentation: a `(head ... name value)`
+    /// list shape or an attribute-map key holding the value.
+    #[serde(default = "indent_declarations")]
+    pub indent_declarations: Vec<IndentDeclaration>,
     #[serde(skip)]
     lookup: Lookup,
+}
+
+/// One way a dialect's definitions declare indentation, e.g. `(declare (indent N))`
+/// (`head` + `name`) or Clojure's `{:style/indent N}` attribute map (`attribute`).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IndentDeclaration {
+    #[serde(default)]
+    pub head: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub attribute: Option<String>,
+}
+
+fn rest_markers() -> Vec<String> {
+    ["&rest", "&body", "&", ".", "&more"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn key_markers() -> Vec<String> {
+    ["&key"].into_iter().map(str::to_owned).collect()
+}
+
+fn regexp_string_prefixes() -> Vec<String> {
+    ["#", "#rx", "#px"].into_iter().map(str::to_owned).collect()
+}
+
+fn indent_declarations() -> Vec<IndentDeclaration> {
+    vec![
+        IndentDeclaration {
+            head: Some("declare".into()),
+            name: Some("indent".into()),
+            attribute: None,
+        },
+        IndentDeclaration {
+            head: None,
+            name: None,
+            attribute: Some(":style/indent".into()),
+        },
+    ]
 }
 
 #[derive(Debug, Clone, Default)]
@@ -79,6 +135,9 @@ struct Lookup {
     special_forms: FxHashSet<String>,
     builtins: FxHashSet<String>,
     constants: FxHashSet<String>,
+    rest_markers: FxHashSet<String>,
+    key_markers: FxHashSet<String>,
+    regexp_prefixes: FxHashSet<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -296,6 +355,9 @@ impl Dialect {
             special_forms: set(&self.special_forms),
             builtins: set(&self.builtins),
             constants: set(&self.constants),
+            rest_markers: set(&self.rest_markers),
+            key_markers: set(&self.key_markers),
+            regexp_prefixes: self.regexp_string_prefixes.iter().cloned().collect(),
         };
         Ok(())
     }
@@ -338,6 +400,21 @@ impl Dialect {
 
     pub fn is_constant(&self, name: &str) -> bool {
         self.lookup.constants.contains(name)
+    }
+
+    /// `name` must already be normalized.
+    pub fn is_rest_marker(&self, name: &str) -> bool {
+        self.lookup.rest_markers.contains(name)
+    }
+
+    /// `name` must already be normalized.
+    pub fn is_key_marker(&self, name: &str) -> bool {
+        self.lookup.key_markers.contains(name)
+    }
+
+    /// `text` is the raw prefix token text.
+    pub fn is_regexp_string_prefix(&self, text: &str) -> bool {
+        self.lookup.regexp_prefixes.contains(text)
     }
 
     pub fn cells_match(&self, a: Cell, b: Cell) -> bool {
@@ -548,6 +625,8 @@ fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::Analysis;
+    use crate::syntax::Tree;
 
     fn table(src: &str) -> toml::Table {
         toml::from_str(src).unwrap()
@@ -583,6 +662,55 @@ defroute = { kind = "function", params = 2 }"#,
         let clj = d.get("clojure").unwrap();
         assert_eq!(clj.def_spec("defroute").unwrap().kind, SymbolKind::Function);
         assert!(clj.def_spec("defn").is_some(), "built-in defs kept");
+    }
+
+    #[test]
+    fn signature_and_indent_conventions_have_stock_defaults() {
+        let cl = Dialects::builtin().get("common-lisp").unwrap().clone();
+        for marker in ["&rest", "&body", "&", ".", "&more"] {
+            assert!(cl.is_rest_marker(marker), "{marker}");
+        }
+        assert!(cl.is_key_marker("&key"));
+        for prefix in ["#", "#rx", "#px"] {
+            assert!(cl.is_regexp_string_prefix(prefix), "{prefix}");
+        }
+        assert_eq!(cl.indent_declarations.len(), 2);
+        assert_eq!(cl.indent_declarations[0].head.as_deref(), Some("declare"));
+        assert_eq!(
+            cl.indent_declarations[1].attribute.as_deref(),
+            Some(":style/indent")
+        );
+    }
+
+    #[test]
+    fn signature_conventions_are_dialect_data() {
+        let d = Dialects::load(&table(
+            "[mine]\nextends = \"common-lisp\"\nrest_markers = [\"&others\"]\nkey_markers = [\"&keys\"]\nregexp_string_prefixes = [\"#re\"]",
+        ))
+        .unwrap();
+        let mine = d.get("mine").unwrap();
+        assert!(mine.is_rest_marker("&others"));
+        assert!(!mine.is_rest_marker("&rest"), "stock marker replaced");
+        assert!(mine.is_key_marker("&keys"));
+        assert!(!mine.is_key_marker("&key"));
+        assert!(mine.is_regexp_string_prefix("#re"));
+        assert!(!mine.is_regexp_string_prefix("#rx"));
+    }
+
+    #[test]
+    fn indent_declarations_are_dialect_data() {
+        let d = Dialects::load(&table(
+            "[mine]\nextends = \"common-lisp\"\nindent_declarations = [{ head = \"annotations\", name = \"indent\" }]",
+        ))
+        .unwrap();
+        let mine = d.get("mine").unwrap().clone();
+        let t = Tree::parse("(defun f (x) (annotations (indent 1)) x)".to_owned(), &mine);
+        let a = Analysis::new(&t, &mine);
+        assert_eq!(a.defs[0].indent, Some(1));
+        // The stock `(declare (indent N))` form is not honored once replaced.
+        let t = Tree::parse("(defun f (x) (declare (indent 1)) x)".to_owned(), &mine);
+        let a = Analysis::new(&t, &mine);
+        assert_eq!(a.defs[0].indent, None);
     }
 
     #[test]

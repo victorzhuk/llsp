@@ -89,7 +89,8 @@ extensions = ["lfe"]
 ```
 
 Dialect keys include `extends`, `extensions`, `language_ids`, `case_sensitive`, `reader`,
-`defs`, `bindings`, `indent`, `indent_prefixes`, `special_forms` and `builtins`; see
+`defs`, `bindings`, `indent`, `indent_prefixes`, `special_forms`, `builtins`,
+`rest_markers`, `key_markers`, `regexp_string_prefixes` and `indent_declarations`; see
 [`dialects/`](dialects) for complete definitions.
 
 The dialect of a file comes from the first match of: `files.associations` (glob → dialect),

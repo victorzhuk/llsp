@@ -229,7 +229,7 @@ fn semantic_tokens(s: &Session, doc: &Document, range: Option<(u32, u32)>) -> Ve
     let tokens = tree.tokens();
     let is_regex_prefix = |i: usize| {
         tokens.get(i).is_some_and(|p| {
-            p.kind == TokenKind::Prefix && matches!(tree.token_text(p), "#" | "#rx" | "#px")
+            p.kind == TokenKind::Prefix && d.is_regexp_string_prefix(tree.token_text(p))
         }) && tokens
             .get(i + 1)
             .is_some_and(|n| n.kind == TokenKind::String)

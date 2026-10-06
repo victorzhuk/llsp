@@ -413,24 +413,40 @@ impl Walker<'_> {
             for c in candidates {
                 let kids = t.children(c);
                 match t.node(c).kind {
-                    NodeKind::List(Delim::Paren) if t.head(c) == Some("declare") => {
-                        for &decl in &kids[1..] {
-                            if t.head(decl) == Some("indent")
-                                && let Some(n) = t.child(decl, 1).and_then(|n| t.atom(n))
-                                && let Ok(n) = n.parse()
-                            {
-                                return Some(n);
+                    NodeKind::List(Delim::Paren) => {
+                        let head = t.head(c);
+                        for decl in self
+                            .d
+                            .indent_declarations
+                            .iter()
+                            .filter(|d| d.head.as_deref() == head)
+                        {
+                            let Some(name) = decl.name.as_deref() else {
+                                continue;
+                            };
+                            for &decl_form in &kids[1..] {
+                                if t.head(decl_form) == Some(name)
+                                    && let Some(n) = t.child(decl_form, 1).and_then(|n| t.atom(n))
+                                    && let Ok(n) = n.parse()
+                                {
+                                    return Some(n);
+                                }
                             }
                         }
                     }
                     NodeKind::List(Delim::Brace) => {
-                        if let Some(i) = kids
+                        for attr in self
+                            .d
+                            .indent_declarations
                             .iter()
-                            .position(|&k| t.atom(k) == Some(":style/indent"))
-                            && let Some(n) = kids.get(i + 1).and_then(|&n| t.atom(n))
-                            && let Ok(n) = n.parse()
+                            .filter_map(|d| d.attribute.as_deref())
                         {
-                            return Some(n);
+                            if let Some(i) = kids.iter().position(|&k| t.atom(k) == Some(attr))
+                                && let Some(n) = kids.get(i + 1).and_then(|&n| t.atom(n))
+                                && let Ok(n) = n.parse()
+                            {
+                                return Some(n);
+                            }
                         }
                     }
                     _ => {}
@@ -712,36 +728,17 @@ impl Walker<'_> {
             return false;
         };
         match t.node(p).kind {
-            NodeKind::Prefix => t.prefix_text(p) == "#'" && t.children(p) == [id],
+            NodeKind::Prefix => under_function_ref(t, id),
             NodeKind::List(Delim::Paren) => {
                 if t.child(p, 1) == Some(id) {
-                    t.head(p).is_some_and(|h| self.d.normalize(h) == "function")
+                    function_form_argument(t, self.d, id)
                 } else {
-                    t.child(p, 0) == Some(id) && !(self.cond_clause(p) || self.reader_vector(p))
+                    t.child(p, 0) == Some(id)
+                        && !(in_cond_clause(t, self.d, p) || in_reader_vector(t, p))
                 }
             }
             _ => false,
         }
-    }
-
-    /// True when `id` is a non-head child of a `(cond ...)` form.
-    fn cond_clause(&self, id: NodeId) -> bool {
-        let t = self.tree;
-        let Some(p) = t.parent(id) else {
-            return false;
-        };
-        t.node(p).kind == NodeKind::List(Delim::Paren)
-            && t.head(p).map(|h| self.key(h)).as_deref() == Some("cond")
-            && t.child(p, 0) != Some(id)
-    }
-
-    /// True when `id`'s parent is a `#` prefix (a reader vector, `#(...)`).
-    fn reader_vector(&self, id: NodeId) -> bool {
-        let t = self.tree;
-        let Some(p) = t.parent(id) else {
-            return false;
-        };
-        t.node(p).kind == NodeKind::Prefix && t.prefix_text(p) == "#"
     }
 
     fn resolve(&self, id: NodeId, key: &str, offset: u32, cell: Cell) -> Target {
@@ -773,6 +770,43 @@ pub fn symbol_like(d: &Dialect, text: &str) -> bool {
         return false;
     }
     !d.is_constant(&d.normalize(text))
+}
+
+/// True when `id` is the sole form under a `#'` prefix.
+pub(crate) fn under_function_ref(t: &Tree, id: NodeId) -> bool {
+    let Some(p) = t.parent(id) else {
+        return false;
+    };
+    t.node(p).kind == NodeKind::Prefix && t.prefix_text(p) == "#'" && t.children(p) == [id]
+}
+
+/// True when `id` is the first argument of a `(function id)` form.
+pub(crate) fn function_form_argument(t: &Tree, d: &Dialect, id: NodeId) -> bool {
+    let Some(p) = t.parent(id) else {
+        return false;
+    };
+    t.node(p).kind == NodeKind::List(Delim::Paren)
+        && t.child(p, 1) == Some(id)
+        && t.head(p).is_some_and(|h| d.normalize(h) == "function")
+}
+
+/// True when `id`'s parent list is a `(cond ...)` clause: its parent's head is
+/// `cond` and `id`'s parent is not the head position itself.
+pub(crate) fn in_cond_clause(t: &Tree, d: &Dialect, id: NodeId) -> bool {
+    let Some(p) = t.parent(id) else {
+        return false;
+    };
+    t.node(p).kind == NodeKind::List(Delim::Paren)
+        && t.head(p).is_some_and(|h| d.normalize(h) == "cond")
+        && t.child(p, 0) != Some(id)
+}
+
+/// True when `id`'s parent is a `#` prefix: a reader vector's data, `#(...)`.
+pub(crate) fn in_reader_vector(t: &Tree, id: NodeId) -> bool {
+    let Some(p) = t.parent(id) else {
+        return false;
+    };
+    t.node(p).kind == NodeKind::Prefix && t.prefix_text(p) == "#"
 }
 
 fn looks_numeric(text: &str) -> bool {

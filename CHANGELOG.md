@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Dialects can now declare their own signature and highlighting conventions:
+  `rest_markers`, `key_markers`, `regexp_string_prefixes` and `indent_declarations`,
+  with the stock dialects' current values as defaults.
+
 ### Fixed
 - Watched-file event bursts and document close no longer block request handling: index
   updates are summarized off the main loop and applied in order.
