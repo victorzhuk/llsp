@@ -182,6 +182,30 @@ fn language_id_survives_configuration_reload() {
 }
 
 #[test]
+fn workspace_folders_changes_are_ignored() {
+    let ws = support::Workspace::new(&[("a.lisp", "(defun helper ())")]);
+    let mut c = ws.client(1);
+
+    // Adding another folder with lisp files changes nothing: roots are fixed.
+    c.notify_raw(
+        "workspace/didChangeWorkspaceFolders",
+        json!({"event": {"added": [{"uri": "file:///elsewhere/other"}], "removed": []}}),
+    );
+    let v = c
+        .request_raw("workspace/symbol", json!({"query": ""}))
+        .unwrap();
+    let names: Vec<&str> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert!(!names.iter().any(|n| n.contains("other")), "{names:?}");
+    assert!(names.contains(&"helper"), "{names:?}");
+    assert!(c.shutdown());
+}
+
+#[test]
 fn bad_client_settings_are_ignored_with_warning() {
     let mut c = Client::start();
     c.notify_raw(

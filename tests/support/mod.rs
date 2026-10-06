@@ -14,6 +14,9 @@ pub struct Client {
     server: Option<JoinHandle<anyhow::Result<bool>>>,
     next_id: i32,
     pub notifications: Vec<Notification>,
+    /// Requests the server sent to the client (e.g. capability registrations),
+    /// auto-answered with an empty result so the server never blocks.
+    pub server_requests: Vec<Request>,
     pub init: Value,
 }
 
@@ -32,6 +35,7 @@ impl Client {
             server: Some(server),
             next_id: 0,
             notifications: Vec::new(),
+            server_requests: Vec::new(),
             init: Value::Null,
         };
         let mut params = json!({"capabilities": {}});
@@ -59,9 +63,18 @@ impl Client {
                     return response_result.map_err(|e| (e.code, e.message));
                 }
                 Message::Notification(n) => self.notifications.push(n),
+                Message::Request(r) => self.answer_server_request(r),
                 other => panic!("unexpected {other:?}"),
             }
         }
+    }
+
+    fn answer_server_request(&mut self, r: Request) {
+        self.server_requests.push(r.clone());
+        self.conn
+            .sender
+            .send(Response::new_ok(r.id, Value::Null).into())
+            .unwrap();
     }
 
     pub fn request<R: lsp_types::request::Request>(&mut self, params: R::Params) -> R::Result {
@@ -91,6 +104,7 @@ impl Client {
             match self.conn.receiver.recv_timeout(TIMEOUT).expect(method) {
                 Message::Notification(n) if n.method == method => return n.params,
                 Message::Notification(n) => self.notifications.push(n),
+                Message::Request(r) => self.answer_server_request(r),
                 other => panic!("unexpected {other:?}"),
             }
         }
