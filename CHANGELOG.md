@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Added
 - Dialects can now declare their own signature and highlighting conventions:
   `rest_markers`, `key_markers`, `regexp_string_prefixes` and `indent_declarations`,
@@ -35,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   help.
 - Log files keep mode 0600 when they already exist, and a symlinked log path is refused
   instead of being written through.
+- Workspace confinement is enforced when a file is read, re-checking the canonicalized
+  path against the roots.
 
 ## [0.2.1] - 2026-09-30
 
