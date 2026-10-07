@@ -272,7 +272,7 @@ impl Server {
         if self.updates_in_flight || self.queued_updates.is_empty() {
             return;
         }
-        let batch: Vec<_> = self.queued_updates.drain(..).collect();
+        let batch = std::mem::take(&mut self.queued_updates);
         self.updates_in_flight = true;
         let settings = self.session.settings.clone();
         let roots = self.session.roots.clone();
