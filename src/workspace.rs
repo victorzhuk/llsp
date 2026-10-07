@@ -255,7 +255,10 @@ pub fn summarize(settings: &Settings, roots: &[PathBuf], path: &Path) -> Option<
 }
 
 pub fn scan(settings: &Settings, roots: &[PathBuf]) -> Vec<FileSummary> {
-    let (files, truncated) = discover(settings, roots, settings.config.workspace.max_files);
+    // Confinement compares canonicalized paths, so the roots must be
+    // canonical too (on macOS, `/var/...` and `/private/var/...` are one place).
+    let roots: Vec<PathBuf> = roots.iter().filter_map(|r| r.canonicalize().ok()).collect();
+    let (files, truncated) = discover(settings, &roots, settings.config.workspace.max_files);
     if truncated {
         log::warn!(
             "workspace has more than {} lisp files; indexing the first {}",
@@ -265,7 +268,7 @@ pub fn scan(settings: &Settings, roots: &[PathBuf]) -> Vec<FileSummary> {
     }
     files
         .par_iter()
-        .filter_map(|p| summarize(settings, roots, p))
+        .filter_map(|p| summarize(settings, &roots, p))
         .collect()
 }
 
@@ -371,13 +374,13 @@ mod tests {
         )
         .unwrap();
         let s = settings("");
-        let (files, _) = discover(&s, &[dir.path().to_path_buf()], usize::MAX);
+        let root = dir.path().canonicalize().unwrap();
+        let (files, _) = discover(&s, &[root.clone()], usize::MAX);
         let summaries: Vec<_> = files
             .iter()
-            .filter_map(|p| summarize(&s, &[dir.path().to_path_buf()], p))
+            .filter_map(|p| summarize(&s, &[root.clone()], p))
             .collect();
         assert_eq!(summaries.len(), 1, "{files:?}");
-        let root = dir.path().canonicalize().unwrap();
         assert!(!is_inside(
             std::slice::from_ref(&root),
             &dir.path().join("link/secret.lisp")
