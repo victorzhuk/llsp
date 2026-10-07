@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-07
+
+### Fixed
+- `workspace::scan` canonicalizes its roots before the read-time confinement check, so
+  library callers on macOS (where `/var` is a symlink into `/private/var`) get a working
+  scan instead of an empty index when roots are passed uncanonicalized.
+
 ## [0.3.0] - 2026-10-07
 
 ### Added
