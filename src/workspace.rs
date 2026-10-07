@@ -375,10 +375,10 @@ mod tests {
         .unwrap();
         let s = settings("");
         let root = dir.path().canonicalize().unwrap();
-        let (files, _) = discover(&s, &[root.clone()], usize::MAX);
+        let (files, _) = discover(&s, std::slice::from_ref(&root), usize::MAX);
         let summaries: Vec<_> = files
             .iter()
-            .filter_map(|p| summarize(&s, &[root.clone()], p))
+            .filter_map(|p| summarize(&s, std::slice::from_ref(&root), p))
             .collect();
         assert_eq!(summaries.len(), 1, "{files:?}");
         assert!(!is_inside(
