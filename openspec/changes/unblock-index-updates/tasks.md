@@ -17,7 +17,7 @@
       surviving `max_items` candidates; verify completion tests stay green and
       `requests_50001_defs/completion` benchmarks at ~457 µs (bounded, no per-candidate
       docstring cloning)
-- [ ] 2.2 `workspace_symbols` was verified to already materialize late (borrowed tuples,
+- [x] 2.2 `workspace_symbols` was verified to already materialize late (borrowed tuples,
       sort, truncate, then clone), so no change is needed; the remaining O(index) scan per
       query is the same as completion's and is bounded work per request
 

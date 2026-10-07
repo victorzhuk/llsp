@@ -493,6 +493,16 @@ mod tests {
     }
 
     #[test]
+    fn scalar_then_nested_env_conflict_is_named() {
+        let err = env_table([
+            ("LLSP_FORMAT".into(), "3".into()),
+            ("LLSP_FORMAT__BODY_INDENT".into(), "4".into()),
+        ])
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("format"), "{err:#}");
+    }
+
+    #[test]
     fn cli_sets() {
         let l = Layers::startup(
             Some(Path::new("/nonexistent/llsp.toml")),

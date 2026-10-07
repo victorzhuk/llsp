@@ -209,6 +209,17 @@ mod tests {
     }
 
     #[test]
+    fn crlf_lines_keep_their_carriage_returns() {
+        assert_eq!(
+            fmt("common-lisp", "(defun f (x)\r\n(let ((y x))\r\ny))\r\n"),
+            "(defun f (x)\r\n  (let ((y x))\r\n    y))\r\n"
+        );
+        // Trailing spaces before the CR are still trimmed (and line 1 aligns
+        // under `a`).
+        assert_eq!(fmt("common-lisp", "(a \r\nb) \r\n"), "(a\r\n b)\r\n");
+    }
+
+    #[test]
     fn call_alignment() {
         assert_eq!(fmt("common-lisp", "(foo a\nb)"), "(foo a\n     b)");
         assert_eq!(fmt("common-lisp", "(foo\nb)"), "(foo\n b)");

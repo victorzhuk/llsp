@@ -87,6 +87,8 @@ fn lisp_text() -> impl Strategy<Value = String> {
             Just("{".to_owned()),
             Just("}".to_owned()),
             Just("\n".to_owned()),
+            Just("\r\n".to_owned()),
+            Just("\r".to_owned()),
             Just(" ".to_owned()),
             Just("\"".to_owned()),
             Just("#".to_owned()),
@@ -115,6 +117,9 @@ proptest! {
         text in lisp_text(),
         d in 0usize..9,
         positions in proptest::collection::vec((0u32..4, 0u32..30), 1..4),
+        close_and_reopen in proptest::bool::ANY,
+        watched_outside in proptest::bool::ANY,
+        invalid_rename in proptest::bool::ANY,
     ) {
         let (lang, uri) = DIALECTS[d];
         let mut c = Client::with(
@@ -132,6 +137,35 @@ proptest! {
                    "contentChanges": [{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 9, "character": 0}}, "text": ")("}]}),
         );
         exercise(&mut c, uri, &text, &positions);
+        // State transitions around the document: close + reopen, watched-file
+        // events (including outside the roots), and a settings reload.
+        if close_and_reopen {
+            c.notify_raw("textDocument/didClose", json!({"textDocument": {"uri": uri}}));
+            c.request_raw("workspace/symbol", json!({"query": ""})).unwrap();
+            c.open(uri, lang, &text);
+        }
+        c.notify_raw(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [
+                {"uri": uri, "type": 2},
+                {"uri": "file:///outside/x.lisp", "type": if watched_outside { 1 } else { 3 }},
+            ]}),
+        );
+        c.notify_raw(
+            "workspace/didChangeConfiguration",
+            json!({"settings": {"format": {"body_indent": 3}}}),
+        );
+        exercise(&mut c, uri, &text, &positions);
+        if invalid_rename {
+            // An invalid new name is a parameter error, not a crash.
+            let err = c
+                .request_raw(
+                    "textDocument/rename",
+                    json!({"textDocument": {"uri": uri}, "position": {"line": 0, "character": 0}, "newName": "two words"}),
+                )
+                .unwrap_err();
+            prop_assert_eq!(err.0, -32602);
+        }
         prop_assert!(c.shutdown());
     }
 }

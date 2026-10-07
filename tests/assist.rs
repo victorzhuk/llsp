@@ -184,6 +184,8 @@ fn hover_kinds() {
         h.contains("(area w h)") && h.contains("Area.") && h.contains("`geo`"),
         "{h}"
     );
+    // The definition's file (and line) is part of the hover.
+    assert!(h.contains("a.lisp:2"), "{h}");
     let h = text(
         c.request_raw("textDocument/hover", ws.pos("a.lisp", "z (car", 0))
             .unwrap(),
@@ -203,6 +205,117 @@ fn hover_kinds() {
         .request_raw("textDocument/hover", ws.pos("a.lisp", "nil", 0))
         .unwrap();
     assert!(v.is_null());
+    c.shutdown();
+}
+
+#[test]
+fn hover_joins_same_name_from_two_files() {
+    let ws = Workspace::new(&[
+        ("a.lisp", "(defun run () 1)"),
+        ("b.lisp", "(defun run () 2)"),
+        ("c.lisp", "(run)"),
+    ]);
+    let mut c = ws.client(2);
+    ws.open(&mut c, "c.lisp");
+    let text = |v: Value| v["contents"]["value"].as_str().unwrap().to_owned();
+    let h = text(
+        c.request_raw("textDocument/hover", ws.pos("c.lisp", "run", 0))
+            .unwrap(),
+    );
+    // Both definitions are shown, each naming its own file.
+    assert!(h.contains("a.lisp") && h.contains("b.lisp"), "{h}");
+    assert_eq!(h.matches("```").count(), 4, "two fenced blocks: {h}");
+    c.shutdown();
+}
+
+#[test]
+fn qualified_hover_narrows_to_the_namespace() {
+    let ws = Workspace::new(&[
+        ("a.lisp", "(in-package :app)\n(defun run () 1)"),
+        ("b.lisp", "(in-package :lib)\n(defun run () 2)"),
+        ("c.lisp", "(app::run)\n(run)"),
+    ]);
+    let mut c = ws.client(2);
+    ws.open(&mut c, "c.lisp");
+    let text = |v: Value| v["contents"]["value"].as_str().unwrap().to_owned();
+    // The first `run` occurrence is inside the qualified `app::run`; positions
+    // on the qualifier itself resolve to nothing.
+    let def = c
+        .request_raw("textDocument/definition", ws.pos("c.lisp", "run", 0))
+        .unwrap();
+    let locations = def.as_array().unwrap();
+    assert_eq!(locations.len(), 1);
+    assert!(locations[0]["uri"].as_str().unwrap().ends_with("a.lisp"));
+    let h = text(
+        c.request_raw("textDocument/hover", ws.pos("c.lisp", "run", 0))
+            .unwrap(),
+    );
+    // Only the definition in `app`, not the one in `lib`.
+    assert!(h.contains("a.lisp"), "{h}");
+    assert!(!h.contains("b.lisp"), "{h}");
+    c.shutdown();
+}
+
+#[test]
+fn completion_labels_appear_once_and_binder_self_is_excluded() {
+    // `car` is a builtin, a workspace definition, and a local at once.
+    let ws = Workspace::new(&[("a.lisp", "(defun car () 1)\n(let ((car 1)) (ca))")]);
+    let mut c = ws.client(1);
+    ws.open(&mut c, "a.lisp");
+    let v = c
+        .request_raw("textDocument/completion", ws.pos("a.lisp", "(ca", 0))
+        .unwrap();
+    let l = labels(&v);
+    assert_eq!(
+        l.iter().filter(|n| *n == "car").count(),
+        1,
+        "each label appears once: {l:?}"
+    );
+    c.shutdown();
+
+    // Completing on the binder's own name does not offer that binder.
+    let ws = Workspace::new(&[("a.lisp", "(let ((foo 1)) foo)")]);
+    let mut c = ws.client(0);
+    ws.open(&mut c, "a.lisp");
+    let v = c
+        .request_raw("textDocument/completion", ws.pos("a.lisp", "((foo", 0))
+        .unwrap();
+    let l = labels(&v);
+    assert!(
+        !l.contains(&"foo".to_owned()),
+        "binder self excluded: {l:?}"
+    );
+    c.shutdown();
+}
+
+#[test]
+fn references_on_ambiguous_global_return_every_occurrence() {
+    let ws = Workspace::new(&[
+        ("a.lisp", "(in-package :app)\n(defun run () 1)"),
+        ("b.lisp", "(in-package :lib)\n(defun run () 2)"),
+        ("c.lisp", "(run)"),
+    ]);
+    let mut c = ws.client(2);
+    ws.open(&mut c, "c.lisp");
+    let v = c
+        .request::<lsp_types::request::References>(lsp_types::ReferenceParams {
+            text_document_position: support::pos(&ws.uri("c.lisp"), 0, 1),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: lsp_types::ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .unwrap();
+    // The occurrence is ambiguous (no qualifier, current namespace defines
+    // nothing), so every same-named occurrence is returned.
+    let uris: Vec<&str> = v
+        .iter()
+        .map(|l| l.uri.as_str().rsplit('/').next().unwrap())
+        .collect();
+    assert!(uris.contains(&"a.lisp"), "{uris:?}");
+    assert!(uris.contains(&"b.lisp"), "{uris:?}");
+    assert!(uris.contains(&"c.lisp"), "{uris:?}");
     c.shutdown();
 }
 

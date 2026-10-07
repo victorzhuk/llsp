@@ -340,6 +340,29 @@ fn deep_dialect_chain_in_project_file_is_named() {
 }
 
 #[test]
+fn unreadable_config_file_is_named() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("bad.toml"), "[not toml at all").unwrap();
+    let out = llsp(dir.path(), &["--config", "bad.toml", "config"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("bad.toml") && stderr.contains("parse"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn garbage_project_file_fails_the_cli_but_names_it() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".llsp.toml"), "[not toml").unwrap();
+    let out = llsp(dir.path(), &["check", "a.lisp"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains(".llsp.toml"), "{stderr}");
+}
+
+#[test]
 fn check_directory_follows_workspace_rules() {
     let dir = tempfile::tempdir().unwrap();
     let write = |rel: &str, text: &str| {

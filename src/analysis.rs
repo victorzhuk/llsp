@@ -104,13 +104,6 @@ impl Analysis {
         v.into_iter()
     }
 
-    pub fn binder_index_at(&self, offset: u32) -> Option<u32> {
-        self.binders
-            .iter()
-            .position(|b| b.start <= offset && offset <= b.end)
-            .map(|i| i as u32)
-    }
-
     pub fn def_at(&self, offset: u32) -> Option<&Def> {
         self.defs
             .iter()

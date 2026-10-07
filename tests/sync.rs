@@ -182,6 +182,18 @@ fn language_id_survives_configuration_reload() {
 }
 
 #[test]
+fn garbage_project_file_warns_and_continues() {
+    // Unlike the CLI, the server keeps running on an unreadable project file.
+    let ws = support::Workspace::new(&[("a.lisp", "(defun helper ())")]);
+    std::fs::write(ws.root().join(".llsp.toml"), "[not toml").unwrap();
+    let mut c = ws.client(1);
+    c.open(&ws.uri("a.lisp"), "lisp", "(defun helper ())");
+    // Defaults apply: common-lisp, no diagnostics on valid code.
+    assert!(c.diagnostics(&ws.uri("a.lisp")).is_empty());
+    assert!(c.shutdown());
+}
+
+#[test]
 fn workspace_folders_changes_are_ignored() {
     let ws = support::Workspace::new(&[("a.lisp", "(defun helper ())")]);
     let mut c = ws.client(1);

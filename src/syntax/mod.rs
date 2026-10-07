@@ -254,13 +254,6 @@ impl Tree {
         (self.node(id).kind == NodeKind::Atom).then_some(id)
     }
 
-    /// Index of the token that starts at or contains `offset`.
-    pub fn token_index_at(&self, offset: u32) -> usize {
-        self.tokens
-            .partition_point(|t| t.end <= offset)
-            .min(self.tokens.len().saturating_sub(1))
-    }
-
     /// True when `offset` sits inside a string or comment, including at the end of a
     /// line comment or an unterminated literal.
     pub fn in_literal_or_comment(&self, offset: u32) -> bool {

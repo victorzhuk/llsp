@@ -364,6 +364,8 @@ mod props {
                 Just(",@".to_owned()),
                 Just("?".to_owned()),
                 Just("\n".to_owned()),
+                Just("\r\n".to_owned()),
+                Just("\r".to_owned()),
                 Just(" ".to_owned()),
                 "[a-z0-9:+#*-]{1,6}",
                 "\\PC",

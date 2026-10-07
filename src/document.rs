@@ -81,10 +81,6 @@ impl Document {
         &self.tree
     }
 
-    pub fn lines(&self) -> &LineIndex {
-        &self.lines
-    }
-
     pub fn apply_changes(
         &mut self,
         changes: Vec<TextDocumentContentChangeEvent>,
@@ -263,6 +259,58 @@ mod tests {
         );
         assert_eq!(d.text(), "(a c d)");
         assert_eq!(d.version, 2);
+        assert_eq!(d.tree().children(Tree::ROOT).len(), 1);
+    }
+
+    #[test]
+    fn crlf_positions_round_trip() {
+        // "(a\r\nbör\r\n)": line 1 starts at byte 4; ö spans bytes 5-6 (1 UTF-16 unit).
+        let d = doc("(a\r\nbör\r\n)");
+        let p = d.position(4, Encoding::Utf16);
+        assert_eq!((p.line, p.character), (1, 0));
+        assert_eq!(d.offset(p, Encoding::Utf16), 4);
+        let p = d.position(8, Encoding::Utf16); // just past "bör"
+        assert_eq!((p.line, p.character), (1, 3), "ö is one UTF-16 unit");
+        assert_eq!(d.offset(Position::new(1, 3), Encoding::Utf16), 8);
+        // A client position past the line content clamps to it, never onto the CR.
+        assert_eq!(d.offset(Position::new(0, 400), Encoding::Utf16), 2);
+        assert_eq!(d.offset(Position::new(1, 400), Encoding::Utf16), 8);
+    }
+
+    #[test]
+    fn overlapping_and_inverted_edits_do_not_panic() {
+        let mut d = doc("(abcdef)");
+        // "(XdY": the second range addresses the document as left by the first
+        // (LSP sequential semantics) and consumes the closing paren.
+        d.apply_changes(
+            vec![
+                change(Some(((0, 1), (0, 4))), "X"),
+                change(Some(((0, 3), (0, 6))), "Y"),
+            ],
+            2,
+            Encoding::Utf16,
+        );
+        assert_eq!(d.text(), "(XdY");
+        assert_eq!(d.tree().children(Tree::ROOT).len(), 1);
+
+        // An inverted range is treated as empty (end clamps to start) and kept.
+        let mut d = doc("(a b)");
+        d.apply_changes(
+            vec![change(Some(((0, 4), (0, 2))), "Z")],
+            2,
+            Encoding::Utf16,
+        );
+        assert_eq!(d.text(), "(a bZ)");
+        assert_eq!(d.tree().children(Tree::ROOT).len(), 1);
+
+        // A UTF-16 change landing mid-surrogate clamps to a char boundary.
+        let mut d = doc("(😀)");
+        d.apply_changes(
+            vec![change(Some(((0, 1), (0, 2))), "x")],
+            2,
+            Encoding::Utf16,
+        );
+        assert!(!d.text().contains('\u{FFFD}'), "{}", d.text());
         assert_eq!(d.tree().children(Tree::ROOT).len(), 1);
     }
 
